@@ -7,3 +7,6 @@ venv/
 dist/
 build/
 work/
+
+# Packs externos: requieren descarga manual según licencia
+assets/vendor/

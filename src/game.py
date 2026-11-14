@@ -3,6 +3,7 @@
 import math
 import random
 import sys
+from pathlib import Path
 import pygame
 
 from .models import CityState, DecisionTree, PUBLICATIONS, SOCIAL_GRAPH, Publication
@@ -30,6 +31,13 @@ class AlcaldeDigitalGame:
         self.small = pygame.font.SysFont("segoeui,arial", 16)
         self.bold = pygame.font.SysFont("segoeui,arial", 27, bold=True)
         self.state = CityState()
+        self.asset_root = Path(__file__).resolve().parent.parent / "assets" / "vendor"
+        self.player_animations = self.load_animation_sets()
+        self.slime_frames = self.load_animation("mossy-cavern/Slimes/SlimeGreen", "SlimeBasic")
+        self.boss_frames = self.load_boss_frames()
+        self.plant_frames = self.load_animation("mossy-cavern/Plant Animations/Plant Animations/Plant 1", "Plant1")
+        self.platform_art = self.load_platform_art()
+        self.music_enabled = self.start_ambient_music()
         self.tree = DecisionTree()
         self.player = pygame.Rect(90, 516, 34, 52)
         self.vx = self.vy = 0.0
@@ -57,13 +65,71 @@ class AlcaldeDigitalGame:
         ]
         self.wisps = [{"x": 700.0, "home": 700.0, "dir": 1, "hp": 2, "flash": 0.0},
                       {"x": 1870.0, "home": 1870.0, "dir": -1, "hp": 2, "flash": 0.0},
-                      {"x": 2320.0, "home": 2320.0, "dir": 1, "hp": 2, "flash": 0.0}]
+                      {"x": 2320.0, "home": 2320.0, "dir": 1, "hp": 2, "flash": 0.0},
+                      {"x": 2670.0, "home": 2670.0, "dir": -1, "hp": 5, "flash": 0.0, "boss": True}]
         self.message = "Explora Ciudad Nova. Habla con las personas y verifica antes de compartir."
         self.dialog: dict | None = None
         self.show_map = self.show_help = False
         self.round_log: list[str] = []
         self.recent_reach = 0
         self.running = True
+
+    def load_animation(self, folder: str, prefix: str) -> list[pygame.Surface]:
+        """Carga PNGs del paquete local y recorta márgenes transparentes enormes."""
+        directory = self.asset_root / folder
+        frames = []
+        if not directory.exists():
+            return frames
+        for path in sorted(directory.glob(f"{prefix}*.png")):
+            try:
+                raw = pygame.image.load(str(path)).convert_alpha()
+                bounds = raw.get_bounding_rect(min_alpha=12)
+                if bounds.width and bounds.height:
+                    frames.append(raw.subsurface(bounds).copy())
+            except pygame.error:
+                continue
+        return frames
+
+    def load_animation_sets(self) -> dict[str, list[pygame.Surface]]:
+        base = "mossy-cavern/BlueWizard Animations/BlueWizard"
+        return {
+            "idle": self.load_animation(f"{base}/2BlueWizardIdle", "Chara - BlueIdle"),
+            "walk": self.load_animation(f"{base}/2BlueWizardWalk", "Chara_BlueWalk"),
+            "jump": self.load_animation(f"{base}/2BlueWizardJump", "CharaWizardJump_"),
+        }
+
+    def load_boss_frames(self) -> list[pygame.Surface]:
+        path = self.asset_root / "zneeke-boss/Free Boss/dark fantasy big boss idle.png"
+        try:
+            sheet = pygame.image.load(str(path)).convert_alpha()
+            return [sheet.subsurface(pygame.Rect(x, 0, 64, 64)).copy() for x in range(0, sheet.get_width(), 64)]
+        except (pygame.error, ValueError):
+            return []
+
+    def load_platform_art(self) -> pygame.Surface | None:
+        path = self.asset_root / "mossy-cavern/Mossy Assets/Mossy Tileset/Mossy - FloatingPlatforms.png"
+        try:
+            sheet = pygame.image.load(str(path)).convert_alpha()
+            area = sheet.subsurface(pygame.Rect(440, 0, 1100, 500)).copy()
+            bounds = area.get_bounding_rect(min_alpha=12)
+            return area.subsurface(bounds).copy() if bounds.width and bounds.height else None
+        except (pygame.error, ValueError):
+            return None
+
+    def start_ambient_music(self) -> bool:
+        music = Path(__file__).resolve().parent.parent / "assets/audio/ciudad_nova_ambience.ogg"
+        if not music.exists():
+            music = self.asset_root / "music/Erased Places/drmseq_ErasedPlaces_OGG/Loops/drmseq_01_Moist_Walls_loop.ogg"
+        try:
+            pygame.mixer.init()
+            if music.exists():
+                pygame.mixer.music.load(str(music))
+                pygame.mixer.music.set_volume(.24)
+                pygame.mixer.music.play(-1)
+                return True
+        except pygame.error:
+            pass
+        return False
 
     def text(self, value: str, x: int, y: int, color=INK, font=None) -> None:
         self.screen.blit((font or self.font).render(value, True, color), (int(x), int(y)))
@@ -74,7 +140,7 @@ class AlcaldeDigitalGame:
             pygame.draw.rect(self.screen, border, rect, 2, border_radius=radius)
 
     def draw_background(self) -> None:
-        self.screen.fill(SKY)
+        self.screen.fill((16, 28, 42))
         # Parallax silhouettes create depth while keeping the walkable plane clear.
         for layer, (color, factor, base) in enumerate((((36, 52, 75), .12, 450), ((44, 67, 83), .25, 505))):
             offset = int(self.camera * factor)
@@ -91,11 +157,17 @@ class AlcaldeDigitalGame:
             view = rect.move(-int(self.camera), 0)
             if view.right < -10 or view.left > W+10:
                 continue
-            pygame.draw.rect(self.screen, (42, 51, 68), (view.x, view.y+8, view.w, view.h), border_radius=5)
-            pygame.draw.rect(self.screen, (76, 81, 100), view, border_radius=7)
-            pygame.draw.rect(self.screen, MINT, (view.x, view.y, view.w, 7), border_radius=4)
-            for gx in range(view.x+16, view.right-4, 42):
-                pygame.draw.line(self.screen, (99, 104, 119), (gx, view.y+15), (gx+13, view.y+26), 2)
+            if self.platform_art:
+                pygame.draw.rect(self.screen,(40,63,49),(view.x,view.y,view.w,view.h),border_radius=4)
+                art_h = max(46, int(view.w*.41))
+                art = pygame.transform.smoothscale(self.platform_art, (view.w, art_h))
+                self.screen.blit(art, (view.x, view.y-int(art_h*.27)))
+            else:
+                pygame.draw.rect(self.screen, (19, 31, 38), (view.x, view.y+8, view.w, view.h), border_radius=5)
+                pygame.draw.rect(self.screen, (47, 64, 60), view, border_radius=7)
+                pygame.draw.rect(self.screen, (86, 143, 98), (view.x, view.y, view.w, 9), border_radius=4)
+                for gx in range(view.x+16, view.right-4, 42):
+                    pygame.draw.line(self.screen, (75, 102, 83), (gx, view.y+17), (gx+13, view.y+29), 2)
         # Civic-themed skyline and signposts.
         for x, label, col in ((50, "BARRIO", (75, 107, 133)), (980, "PLAZA", (101, 116, 121)),
                                (1470, "CENTRO CÍVICO", (94, 105, 131)), (2390, "CABILDO", (109, 105, 129))):
@@ -125,6 +197,19 @@ class AlcaldeDigitalGame:
         bob = math.sin(self.walk_time*17)*2 if moving else math.sin(pygame.time.get_ticks()/290)*1.5
         if self.invulnerable and int(self.invulnerable*18) % 2:
             return
+        animation = self.player_animations["walk"] if moving else self.player_animations["jump"] if not self.grounded else self.player_animations["idle"]
+        if animation:
+            frame = animation[int(pygame.time.get_ticks() / (68 if moving else 110)) % len(animation)]
+            height = 70 if moving or not self.grounded else 67
+            scale = height / max(1, frame.get_height())
+            sprite = pygame.transform.smoothscale(frame, (max(1, int(frame.get_width()*scale)), height))
+            if self.facing < 0:
+                sprite = pygame.transform.flip(sprite, True, False)
+            self.screen.blit(sprite, (int(x+self.player.width/2-sprite.get_width()/2), int(y+self.player.height-sprite.get_height()+bob)))
+            if self.attack_timer > 0:
+                ax = x + (27 if self.facing > 0 else -31)
+                pygame.draw.arc(self.screen, CREAM, (ax,y+8,42,43), -.9 if self.facing > 0 else 2.2, 1.0 if self.facing > 0 else 4.1, 4)
+            return
         # Cape and legs animate independently for a readable cartoon silhouette.
         cape = [(x+8,y+24+bob),(x+28,y+26+bob),(x+34-self.facing*4,y+47+bob),(x+7,y+43+bob)]
         pygame.draw.polygon(self.screen, (229, 121, 83), cape)
@@ -150,12 +235,25 @@ class AlcaldeDigitalGame:
             if not -55 < x < W+55:
                 continue
             y = 537 + math.sin(pygame.time.get_ticks()/210+wisp["home"])*8
-            color = CREAM if wisp["flash"] > 0 else (178, 120, 205)
-            pygame.draw.circle(self.screen,(81,64,111),(int(x),int(y)),23)
-            pygame.draw.circle(self.screen,color,(int(x),int(y-2)),16)
-            pygame.draw.circle(self.screen,INK,(int(x-5),int(y-4)),3)
-            pygame.draw.circle(self.screen,INK,(int(x+5),int(y-4)),3)
-            pygame.draw.arc(self.screen,INK,(x-6,y+1,12,9),0,math.pi,2)
+            if wisp.get("boss") and self.boss_frames:
+                frame = self.boss_frames[int(pygame.time.get_ticks()/125) % len(self.boss_frames)]
+                sprite = pygame.transform.scale(frame, (96, 96))
+                self.screen.blit(sprite, (int(x-48), int(555-96)))
+                self.text("GUARDIÁN DEL RUMOR",x-72,458,(224,171,129),self.small)
+                pygame.draw.rect(self.screen,(44,30,37),(x-35,474,70,6),border_radius=3)
+                pygame.draw.rect(self.screen,CORAL,(x-35,474,int(70*wisp["hp"]/5),6),border_radius=3)
+            elif self.slime_frames:
+                frame = self.slime_frames[int(pygame.time.get_ticks()/95+wisp["home"]) % len(self.slime_frames)]
+                self.screen.blit(pygame.transform.smoothscale(frame, (58, 48)), (int(x-29), int(y-24)))
+                if wisp["flash"] > 0:
+                    tint = pygame.Surface((58,48), pygame.SRCALPHA); tint.fill((255,255,255,110)); self.screen.blit(tint,(int(x-29),int(y-24)))
+            else:
+                color = CREAM if wisp["flash"] > 0 else (178, 120, 205)
+                pygame.draw.circle(self.screen,(81,64,111),(int(x),int(y)),23)
+                pygame.draw.circle(self.screen,color,(int(x),int(y-2)),16)
+                pygame.draw.circle(self.screen,INK,(int(x-5),int(y-4)),3)
+                pygame.draw.circle(self.screen,INK,(int(x+5),int(y-4)),3)
+                pygame.draw.arc(self.screen,INK,(x-6,y+1,12,9),0,math.pi,2)
             self.text("RUMOR",x-25,y-39,CORAL,self.small)
             wisp["flash"] = max(0,wisp["flash"]-dt)
 
@@ -343,6 +441,14 @@ class AlcaldeDigitalGame:
 
     def draw(self,dt):
         self.draw_background()
+        for i, world_x in enumerate((165, 530, 875, 1365, 1885, 2310, 2710)):
+            if self.plant_frames:
+                frame = self.plant_frames[int(pygame.time.get_ticks()/135 + i*8) % len(self.plant_frames)]
+                scale = 54 / max(1, frame.get_height())
+                plant = pygame.transform.smoothscale(frame, (max(1,int(frame.get_width()*scale)),54))
+                sx = int(world_x-self.camera)
+                if -plant.get_width() < sx < W:
+                    self.screen.blit(plant,(sx,574-plant.get_height()+9))
         for n in self.terminals: self.draw_terminal(n)
         self.draw_wisps(dt)
         # Firefly motes, drawn in screen space for a gentle animated atmosphere.
