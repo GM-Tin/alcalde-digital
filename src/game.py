@@ -9,7 +9,9 @@ import pygame
 from .models import CityState, DecisionTree, PUBLICATIONS, SOCIAL_GRAPH, Publication
 
 W, H = 1100, 720
-WORLD_W = 2780
+ZONE_W = 1850
+WORLD_W = ZONE_W * 3
+ZONE_NAMES = ("Bosque de los Ecos", "Barrio de Cristal", "Observatorio Celeste")
 SKY = (26, 39, 64)
 INK = (29, 34, 47)
 CREAM = (247, 239, 216)
@@ -35,6 +37,7 @@ class AlcaldeDigitalGame:
         self.player_animations = self.load_animation_sets()
         self.slime_frames = self.load_animation("mossy-cavern/Slimes/SlimeGreen", "SlimeBasic")
         self.boss_frames = self.load_boss_frames()
+        self.boss_walk_frames = self.load_boss_frames("walk")
         self.plant_frames = self.load_animation("mossy-cavern/Plant Animations/Plant Animations/Plant 1", "Plant1")
         self.platform_art = self.load_platform_art()
         self.music_enabled = self.start_ambient_music()
@@ -50,25 +53,47 @@ class AlcaldeDigitalGame:
         self.health = 5
         self.sparks: list[list[float]] = []
         self.platforms = [pygame.Rect(*p) for p in (
-            (0, 574, 430, 160), (500, 574, 340, 160), (920, 574, 410, 160),
-            (1410, 574, 450, 160), (1940, 574, 340, 160), (2370, 574, 410, 160),
-            (205, 465, 145, 20), (610, 455, 130, 20), (1045, 452, 165, 20),
-            (1540, 450, 145, 20), (2030, 453, 130, 20), (2500, 449, 160, 20),
-            (355, 360, 115, 18), (810, 350, 115, 18), (1270, 355, 110, 18),
-            (1775, 355, 110, 18), (2250, 355, 115, 18),
+            # Zona 1: saltos escalonados sobre plataformas de musgo.
+            (0,574,610,180),(660,574,600,180),(1310,574,510,180),
+            (150,466,180,20),(700,452,190,20),(1230,454,175,20),(1600,448,160,20),
+            (420,354,115,18),(975,344,130,18),(1505,350,115,18),
+            # Zona 2: columnas y terrazas de cristal.
+            (1850,574,550,180),(2450,574,550,180),(3050,574,570,180),
+            (1940,454,165,20),(2500,439,180,20),(3050,454,170,20),(3380,442,185,20),
+            (2190,352,125,18),(2740,330,125,18),(3280,345,120,18),
+            # Zona 3: islotes más altos y puentes del observatorio.
+            (3700,574,580,180),(4330,574,580,180),(4960,574,590,180),
+            (3790,454,180,20),(4380,440,170,20),(4890,432,185,20),(5290,450,170,20),
+            (4050,348,125,18),(4610,328,130,18),(5140,346,125,18),
         )]
+        pub_data = (
+            ("El colegio cerrará mañana por una orden municipal.", False, "Mensaje reenviado sin enlace ni comunicado"),
+            ("La jornada de limpieza será el sábado a las 9.", True, "Calendario publicado por la Alcaldía"),
+            ("Un candidato eliminará el parque del barrio.", False, "Captura recortada, sin contexto"),
+            ("El debate público será el viernes a las 5.", True, "Agenda electoral oficial con fecha y lugar"),
+            ("El nuevo puente abrirá hoy a medianoche; comparte antes de que lo borren.", False, "Audio anónimo sin fecha ni fuente primaria"),
+            ("La biblioteca móvil visitará el barrio el miércoles.", True, "Agenda pública con fecha y recorrido"),
+        )
+        positions = (300, 1110, 2110, 3160, 4100, 5140)
+        challenge_types = ("math", "source", "tic", "math", "source", "tic")
         self.terminals = [
-            {"x": 292, "title": "Colegio", "done": False, "pub": Publication("El colegio cerrará mañana por una orden municipal.", False, "Mensaje reenviado sin enlace ni comunicado")},
-            {"x": 1112, "title": "Plaza", "done": False, "pub": Publication("La jornada de limpieza será el sábado a las 9.", True, "Calendario publicado por la Alcaldía")},
-            {"x": 1634, "title": "Centro cívico", "done": False, "pub": Publication("Un candidato eliminará el parque del barrio.", False, "Captura recortada, sin contexto")},
-            {"x": 2580, "title": "Cabildo", "done": False, "pub": Publication("El debate público será el viernes a las 5.", True, "Agenda electoral oficial con fecha y lugar")},
+            {"x": x, "done": False, "unlocked": False, "challenge": kind,
+             "pub": Publication(*pub)}
+            for x, kind, pub in zip(positions, challenge_types, pub_data)
         ]
-        self.wisps = [{"x": 700.0, "home": 700.0, "dir": 1, "hp": 2, "flash": 0.0},
-                      {"x": 1870.0, "home": 1870.0, "dir": -1, "hp": 2, "flash": 0.0},
-                      {"x": 2320.0, "home": 2320.0, "dir": 1, "hp": 2, "flash": 0.0},
-                      {"x": 2670.0, "home": 2670.0, "dir": -1, "hp": 5, "flash": 0.0, "boss": True}]
+        self.wisps = [
+            {"x":x,"home":x,"dir":direction,"hp":2,"flash":0.0}
+            for x,direction in ((760,1),(1580,-1),(2310,1),(3420,-1),(4510,1),(5010,-1))
+        ] + [{"x":5410.0,"home":5410.0,"dir":-1,"hp":8,"flash":0.0,"boss":True}]
         self.message = "Explora Ciudad Nova. Habla con las personas y verifica antes de compartir."
         self.dialog: dict | None = None
+        self.challenge_node: dict | None = None
+        self.challenge_feedback = ""
+        self.tic_board: list[str] = [""] * 9
+        self.tic_turn = "X"
+        self.challenge_options: list[str] = []
+        self.challenge_answer = 0
+        self.active_zone = 0
         self.show_map = self.show_help = False
         self.round_log: list[str] = []
         self.recent_reach = 0
@@ -98,11 +123,21 @@ class AlcaldeDigitalGame:
             "jump": self.load_animation(f"{base}/2BlueWizardJump", "CharaWizardJump_"),
         }
 
-    def load_boss_frames(self) -> list[pygame.Surface]:
-        path = self.asset_root / "zneeke-boss/Free Boss/dark fantasy big boss idle.png"
+    def load_boss_frames(self, animation: str = "idle") -> list[pygame.Surface]:
+        path = self.asset_root / f"zneeke-boss/Free Boss/dark fantasy big boss {animation}.png"
         try:
             sheet = pygame.image.load(str(path)).convert_alpha()
-            return [sheet.subsurface(pygame.Rect(x, 0, 64, 64)).copy() for x in range(0, sheet.get_width(), 64)]
+            frames = []
+            for x in range(0, sheet.get_width(), 64):
+                frame = sheet.subsurface(pygame.Rect(x, 0, 64, 64)).copy()
+                bounds = frame.get_bounding_rect(min_alpha=8)
+                if bounds.width and bounds.height:
+                    frame = frame.subsurface(bounds).copy()
+                    # El sprite original es casi una silueta negra: darle luz violeta
+                    # y ojos visibles para separarlo del fondo del observatorio.
+                    frame.fill((75,42,115,0),special_flags=pygame.BLEND_RGBA_ADD)
+                    frames.append(frame)
+            return frames
         except (pygame.error, ValueError):
             return []
 
@@ -140,9 +175,17 @@ class AlcaldeDigitalGame:
             pygame.draw.rect(self.screen, border, rect, 2, border_radius=radius)
 
     def draw_background(self) -> None:
-        self.screen.fill((16, 28, 42))
-        # Parallax silhouettes create depth while keeping the walkable plane clear.
-        for layer, (color, factor, base) in enumerate((((36, 52, 75), .12, 450), ((44, 67, 83), .25, 505))):
+        zone = min(2, int((self.camera + W*.45) // ZONE_W))
+        self.active_zone = zone
+        palettes = (
+            ((16,28,42),(38,57,72),(48,76,77),(125,184,140)),
+            ((19,25,49),(46,53,87),(65,78,112),(130,211,230)),
+            ((23,22,48),(54,45,87),(81,66,118),(205,163,245)),
+        )
+        sky, far, near, accent = palettes[zone]
+        self.screen.fill(sky)
+        # Siluetas y luces cambian al cruzar a otra región.
+        for layer, (color, factor, base) in enumerate(((far, .12, 450), (near, .25, 505))):
             offset = int(self.camera * factor)
             for i in range(-1, 7):
                 x = i * 260 - offset % 260
@@ -152,44 +195,101 @@ class AlcaldeDigitalGame:
         for i in range(46):
             x = (i * 137 - int(self.camera*.16)) % W
             y = 45 + (i*71) % 290
-            pygame.draw.circle(self.screen, (117, 143, 164), (x, y), 1 + i % 2)
+            pygame.draw.circle(self.screen, accent, (x, y), 1 + i % 2)
         for rect in self.platforms:
             view = rect.move(-int(self.camera), 0)
             if view.right < -10 or view.left > W+10:
                 continue
-            if self.platform_art:
+            region = min(2, rect.centerx // ZONE_W)
+            if rect.height >= 100:
+                ground_colors=((43,66,58),(37,51,75),(52,43,74))
+                top_colors=((96,153,104),(105,198,211),(157,116,184))
+                pygame.draw.rect(self.screen,ground_colors[region],view)
+                pygame.draw.rect(self.screen,top_colors[region],(view.x,view.y,view.w,13),border_radius=5)
+                for gx in range(view.x+24,view.right-8,72):
+                    pygame.draw.line(self.screen,tuple(min(255,c+18) for c in ground_colors[region]),(gx,view.y+27),(gx+17,view.y+39),2)
+                if region==1:
+                    for gx in range(view.x+50,view.right-20,145):
+                        pygame.draw.polygon(self.screen,(75,130,163),((gx-9,view.y),(gx,view.y-22),(gx+9,view.y)))
+                elif region==2:
+                    for gx in range(view.x+35,view.right-10,95):
+                        pygame.draw.circle(self.screen,(218,183,239),(gx,view.y+23),2)
+            elif region == 0 and self.platform_art:
                 pygame.draw.rect(self.screen,(40,63,49),(view.x,view.y,view.w,view.h),border_radius=4)
                 art_h = max(46, int(view.w*.41))
                 art = pygame.transform.smoothscale(self.platform_art, (view.w, art_h))
                 self.screen.blit(art, (view.x, view.y-int(art_h*.27)))
+            elif region == 1:
+                pygame.draw.rect(self.screen,(39,54,83),(view.x,view.y+5,view.w,view.h),border_radius=6)
+                pygame.draw.polygon(self.screen,(91,154,174),((view.x,view.y+7),(view.x+14,view.y-6),(view.x+view.w-14,view.y-6),(view.right,view.y+7)))
+                pygame.draw.line(self.screen,(160,238,246),(view.x+18,view.y+3),(view.right-18,view.y+3),3)
+                for cx in (view.x+20,view.right-20):
+                    pygame.draw.polygon(self.screen,(68,116,160),((cx-9,view.y+17),(cx,view.y+7),(cx+9,view.y+17),(cx,view.y+view.h-3)))
+            elif region == 2:
+                pygame.draw.rect(self.screen,(64,49,91),(view.x,view.y+4,view.w,view.h),border_radius=12)
+                pygame.draw.rect(self.screen,(128,95,158),(view.x,view.y-5,view.w,13),border_radius=8)
+                pygame.draw.line(self.screen,(220,185,250),(view.x+14,view.y-1),(view.right-14,view.y-1),2)
+                for cx in range(view.x+24,view.right-12,44):
+                    pygame.draw.circle(self.screen,(237,206,255),(cx,view.y+12),3)
             else:
                 pygame.draw.rect(self.screen, (19, 31, 38), (view.x, view.y+8, view.w, view.h), border_radius=5)
                 pygame.draw.rect(self.screen, (47, 64, 60), view, border_radius=7)
                 pygame.draw.rect(self.screen, (86, 143, 98), (view.x, view.y, view.w, 9), border_radius=4)
                 for gx in range(view.x+16, view.right-4, 42):
                     pygame.draw.line(self.screen, (75, 102, 83), (gx, view.y+17), (gx+13, view.y+29), 2)
-        # Civic-themed skyline and signposts.
-        for x, label, col in ((50, "BARRIO", (75, 107, 133)), (980, "PLAZA", (101, 116, 121)),
-                               (1470, "CENTRO CÍVICO", (94, 105, 131)), (2390, "CABILDO", (109, 105, 129))):
-            sx = x - int(self.camera*.55)
-            if -190 < sx < W+30:
-                pygame.draw.rect(self.screen, col, (sx, 420, 172, 154), border_radius=12)
-                pygame.draw.polygon(self.screen, (119, 132, 155), ((sx-12, 426), (sx+86, 362), (sx+184, 426)))
-                for wx in (sx+24, sx+74, sx+124):
-                    pygame.draw.rect(self.screen, (248, 206, 128), (wx, 450, 23, 29), border_radius=4)
-                self.text(label, sx+10, 535, CREAM, self.small)
+        for index, world_x in enumerate((120,900,1990,2860,3830,4800)):
+            self.draw_magic_house(world_x - int(self.camera*.55), 135 + (index%2)*32, index//2)
+
+    def draw_magic_house(self, x: int, height: int, style: int) -> None:
+        """Siluetas de santuarios fantásticos: sin letreros ni nombres flotantes."""
+        if x < -180 or x > W+180:
+            return
+        base_y = 573
+        palette = ((70,88,93),(65,75,113),(74,59,109))
+        stone = palette[min(2,style)]
+        glow = ((170,225,175),(120,224,245),(223,181,255))[min(2,style)]
+        center = x+70
+        if style == 0:  # casa de tronco encantado
+            body_top=base_y-int(height*.57)
+            pygame.draw.rect(self.screen,stone,(x+35,body_top,76,base_y-body_top),border_radius=15)
+            pygame.draw.polygon(self.screen,(118,94,139),((x+18,body_top+9),(center,base_y-height),(x+128,body_top+9),(x+116,body_top+22),(x+30,body_top+22)))
+            pygame.draw.line(self.screen,(192,157,204),(x+34,body_top+22),(x+106,body_top+22),3)
+            pygame.draw.ellipse(self.screen,(36,44,62),(center-14,base_y-48,28,48))
+            pygame.draw.ellipse(self.screen,glow,(x+43,body_top+28,12,19))
+            pygame.draw.ellipse(self.screen,glow,(x+91,body_top+28,12,19))
+        elif style == 1:  # vivienda de cristal
+            pygame.draw.polygon(self.screen,stone,((center-56,base_y),(center-48,base_y-height*.55),(center,base_y-height),(center+48,base_y-height*.55),(center+56,base_y)))
+            pygame.draw.polygon(self.screen,(91,113,158),((center-42,base_y-height*.55),(center,base_y-height),(center,base_y)))
+            pygame.draw.line(self.screen,glow,(center,base_y-height+18),(center,base_y-15),4)
+        else:  # pabellón del observatorio con anillo celeste
+            pygame.draw.rect(self.screen,stone,(x+38,base_y-height*.6,66,height*.6),border_radius=13)
+            pygame.draw.polygon(self.screen,(106,83,145),((x+22,base_y-height*.6),(center,base_y-height),(x+120,base_y-height*.6)))
+            pygame.draw.ellipse(self.screen,glow,(x+12,base_y-height-23,116,38),4)
+        for wx in (center-22,center+12):
+            pygame.draw.ellipse(self.screen,glow,(wx,base_y-height*.39,12,22))
 
     def draw_terminal(self, node: dict) -> None:
         x = int(node["x"] - self.camera)
         if not -60 < x < W+60:
             return
-        glow = GOLD if not node["done"] else MINT
-        pygame.draw.ellipse(self.screen, (*glow, 48), (x-31, 506, 62, 80))
-        pygame.draw.rect(self.screen, (45, 59, 76), (x-18, 486, 36, 76), border_radius=10)
-        pygame.draw.rect(self.screen, glow, (x-12, 495, 24, 37), border_radius=6)
-        pygame.draw.circle(self.screen, CREAM, (x, 513), 5)
-        self.text("✓" if node["done"] else "!", x-7, 535, glow, self.bold)
-        self.text(node["title"], x-35, 463, CREAM, self.small)
+        zone = min(2, node["x"] // ZONE_W)
+        colors = ((152,235,177),(107,226,247),(216,171,255))
+        glow = (78,92,102) if node["done"] else colors[zone]
+        aura = pygame.Surface((124,142),pygame.SRCALPHA)
+        pygame.draw.ellipse(aura,(*glow,42),(4,4,116,132))
+        self.screen.blit(aura,(x-62,438))
+        pygame.draw.polygon(self.screen,(56,66,82),((x-20,558),(x-13,545),(x+13,545),(x+20,558)))
+        pygame.draw.ellipse(self.screen,(58,74,91),(x-27,551,54,14))
+        float_y = int(math.sin(pygame.time.get_ticks()/330+x*.01)*5)
+        crystal = [(x,474+float_y),(x+20,500+float_y),(x+14,535+float_y),(x,546+float_y),(x-14,535+float_y),(x-20,500+float_y)]
+        pygame.draw.polygon(self.screen,glow,crystal)
+        pygame.draw.polygon(self.screen,(229,251,255),((x,480+float_y),(x+4,502+float_y),(x+1,531+float_y),(x-8,524+float_y)),0)
+        pygame.draw.polygon(self.screen,(32,45,65),crystal,2)
+        for i in range(3):
+            r = 35 + i*8
+            pygame.draw.arc(self.screen,glow,(x-r,490-r//3+float_y,2*r,r),3.4,5.9,1)
+        if node["done"]:
+            pygame.draw.circle(self.screen,MINT,(x,513+float_y),5)
 
     def draw_player(self) -> None:
         x, y = self.player.x-self.camera, self.player.y
@@ -236,12 +336,18 @@ class AlcaldeDigitalGame:
                 continue
             y = 537 + math.sin(pygame.time.get_ticks()/210+wisp["home"])*8
             if wisp.get("boss") and self.boss_frames:
-                frame = self.boss_frames[int(pygame.time.get_ticks()/125) % len(self.boss_frames)]
-                sprite = pygame.transform.scale(frame, (96, 96))
-                self.screen.blit(sprite, (int(x-48), int(555-96)))
-                self.text("GUARDIÁN DEL RUMOR",x-72,458,(224,171,129),self.small)
-                pygame.draw.rect(self.screen,(44,30,37),(x-35,474,70,6),border_radius=3)
-                pygame.draw.rect(self.screen,CORAL,(x-35,474,int(70*wisp["hp"]/5),6),border_radius=3)
+                frames = self.boss_walk_frames if abs(wisp["x"]-wisp["home"])>10 and self.boss_walk_frames else self.boss_frames
+                frame = frames[int(pygame.time.get_ticks()/115) % len(frames)]
+                height = 150
+                scale = height / max(1, frame.get_height())
+                sprite = pygame.transform.scale(frame,(max(1,int(frame.get_width()*scale)),height))
+                glow = pygame.Surface((220,210),pygame.SRCALPHA)
+                pygame.draw.ellipse(glow,(184,100,181,38),(15,12,190,185))
+                self.screen.blit(glow,(int(x-110),int(574-190)))
+                self.screen.blit(sprite,(int(x-sprite.get_width()/2),574-height))
+                pygame.draw.ellipse(self.screen,(23,18,39),(int(x-52),560,104,18))
+                pygame.draw.rect(self.screen,(44,30,37),(x-38,463,76,7),border_radius=3)
+                pygame.draw.rect(self.screen,(198,89,128),(x-38,463,int(76*wisp["hp"]/8),7),border_radius=3)
             elif self.slime_frames:
                 frame = self.slime_frames[int(pygame.time.get_ticks()/95+wisp["home"]) % len(self.slime_frames)]
                 self.screen.blit(pygame.transform.smoothscale(frame, (58, 48)), (int(x-29), int(y-24)))
@@ -254,7 +360,9 @@ class AlcaldeDigitalGame:
                 pygame.draw.circle(self.screen,INK,(int(x-5),int(y-4)),3)
                 pygame.draw.circle(self.screen,INK,(int(x+5),int(y-4)),3)
                 pygame.draw.arc(self.screen,INK,(x-6,y+1,12,9),0,math.pi,2)
-            self.text("RUMOR",x-25,y-39,CORAL,self.small)
+            if not wisp.get("boss"):
+                pygame.draw.circle(self.screen,(255,220,173),(int(x-6),int(y-5)),2)
+                pygame.draw.circle(self.screen,(255,220,173),(int(x+6),int(y-5)),2)
             wisp["flash"] = max(0,wisp["flash"]-dt)
 
     def draw_hud(self) -> None:
@@ -267,11 +375,11 @@ class AlcaldeDigitalGame:
         self.text(f"Datos verificados  {self.state.verified_info:02}",W-264,27,BLUE,self.small)
         self.text(f"Confianza  {self.state.trust:02}    Rumores  {self.state.misinformation:02}",W-264,53,CREAM,self.small)
         self.panel((24,H-62,612,40),(17,27,44),13,(68,83,104))
-        self.text("A/D o ←→ mover   ESPACIO saltar   X pulso   E conversar   M mapa   H ayuda",38,H-52,CREAM,self.small)
+        self.text("A/D o ←→ mover   ESPACIO saltar   X pulso   E cristal   M mapa   H ayuda",38,H-52,CREAM,self.small)
         nearest = next((n for n in self.terminals if abs(n["x"]-self.player.centerx)<90 and not n["done"]),None)
         if nearest and self.dialog is None:
             self.panel((W//2-142,H-119,284,42),(249,222,160),13)
-            self.text("E  ·  Investigar publicación",W//2-119,H-108,INK,self.small)
+            self.text("E  ·  Activar cristal",W//2-119,H-108,INK,self.small)
         if self.message and self.dialog is None:
             self.text(self.message[:92],25,101,(221,229,231),self.small)
 
@@ -279,18 +387,128 @@ class AlcaldeDigitalGame:
         if not self.dialog:
             return
         shade=pygame.Surface((W,H),pygame.SRCALPHA); shade.fill((8,12,24,175)); self.screen.blit(shade,(0,0))
+        if self.dialog.get("stage") == "challenge":
+            self.draw_challenge()
+            return
         self.panel((150,177,800,383),(246,240,221),25,(250,190,91))
         node=self.dialog
-        self.text(node["title"],190,205,(49,105,86),self.bold)
-        self.text("PUBLICACIÓN",190,252,(93,105,111),self.small)
+        self.text("FRAGMENTO RECUPERADO",190,205,(49,105,86),self.bold)
+        self.text("MENSAJE",190,252,(93,105,111),self.small)
         self.text_wrapped(node["pub"].text,190,280,715,INK,self.bold)
         self.text_wrapped("Fuente: "+node["pub"].source,190,348,715,(83,100,108),self.small)
-        lines=["V  Verificar la fuente", "C  Compartir (después de verificar)",
-               "R  Reportar si es falsa", "I  Ignorar y no amplificar", "ESC  Cerrar"]
+        lines=["V  Contrastar la fuente", "C  Compartir (después de verificar)",
+               "R  Reportar si no es fiable", "I  No amplificar", "ESC  Cerrar"]
         for i,line in enumerate(lines):
             self.text(line,197,405+i*27,(50,86,87),self.small)
         if self.message:
             self.text_wrapped(self.message,525,418,375,(111,82,42),self.small)
+
+    def begin_challenge(self, node: dict) -> None:
+        node_index = self.terminals.index(node)
+        self.challenge_node = node
+        node["pub"].verified = None
+        self.challenge_feedback = "Resuelve el juego para recuperar el mensaje."
+        self.dialog = {"stage":"challenge", "node":node}
+        if node["challenge"] == "math":
+            a, b = 8 + node_index, 3 + node_index % 3
+            if node_index % 2:
+                a, b = a + 5, b
+                answer = a - b
+                expression = f"{a} − {b} = ?"
+            else:
+                answer = a + b
+                expression = f"{a} + {b} = ?"
+            self.challenge_answer = answer
+            self.challenge_options = [str(answer), str(answer+2), str(answer-3)]
+            random.shuffle(self.challenge_options)
+            self.challenge_answer = self.challenge_options.index(str(answer))
+            self.challenge_prompt = expression
+        elif node["challenge"] == "source":
+            options = [
+                "Calendario oficial con fecha y enlace",
+                "Captura reenviada sin contexto",
+                "Audio anónimo que pide compartir ya",
+            ]
+            random.shuffle(options)
+            self.challenge_options = options
+            self.challenge_answer = options.index("Calendario oficial con fecha y enlace")
+            self.challenge_prompt = "¿Qué evidencia merece más confianza?"
+        else:
+            self.tic_board = [""] * 9
+            self.tic_turn = "X"
+            self.challenge_prompt = "Haz tres en raya para romper el sello."
+
+    def check_tic_winner(self) -> str | None:
+        lines = ((0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6))
+        for a,b,c in lines:
+            if self.tic_board[a] and self.tic_board[a] == self.tic_board[b] == self.tic_board[c]:
+                return self.tic_board[a]
+        return "draw" if all(self.tic_board) else None
+
+    def complete_challenge(self) -> None:
+        node = self.challenge_node
+        if not node:
+            return
+        node["unlocked"] = True
+        self.challenge_node = None
+        self.dialog = node
+        self.message = "El cristal cedió. Ahora revisa el mensaje y su fuente."
+
+    def answer_challenge(self, choice: int) -> None:
+        if not self.challenge_node or not 0 <= choice < len(self.challenge_options):
+            return
+        if choice == self.challenge_answer:
+            self.complete_challenge()
+        else:
+            self.challenge_feedback = "No coincide. Prueba otra vez; el cristal sigue abierto."
+
+    def play_tic(self, cell: int) -> None:
+        if self.tic_turn != "X" or not 0 <= cell < 9 or self.tic_board[cell]:
+            return
+        self.tic_board[cell] = "X"
+        winner = self.check_tic_winner()
+        if winner == "X" or winner == "draw":
+            self.complete_challenge(); return
+        self.tic_turn = "O"
+        choices = [i for i,v in enumerate(self.tic_board) if not v]
+        if choices:
+            self.tic_board[random.choice(choices)] = "O"
+        winner = self.check_tic_winner()
+        if winner == "O":
+            self.challenge_feedback = "El sello se reinició. Puedes volver a intentarlo."
+            self.tic_board = [""] * 9
+            self.tic_turn = "X"
+        else:
+            self.tic_turn = "X"
+
+    def draw_challenge(self) -> None:
+        node = self.challenge_node
+        if not node:
+            return
+        self.panel((125,112,850,505),(239,237,224),26,(167,202,220))
+        self.text("DESAFÍO DEL CRISTAL",180,145,(55,89,104),self.bold)
+        self.text_wrapped(self.challenge_prompt,180,196,735,INK,self.bold)
+        if node["challenge"] == "tic":
+            left, top, size = 400, 290, 100
+            for i, mark in enumerate(self.tic_board):
+                row, col = divmod(i,3)
+                rect = pygame.Rect(left+col*size,top+row*size,size-5,size-5)
+                pygame.draw.rect(self.screen,(208,223,222),rect,border_radius=12)
+                pygame.draw.rect(self.screen,(115,159,168),rect,2,border_radius=12)
+                if mark:
+                    self.text(mark,rect.centerx-19,rect.centery-27,(70,117,135) if mark=="X" else (142,95,159),self.bold)
+                else:
+                    self.text(str(i+1),rect.centerx-6,rect.centery-12,(120,145,146),self.small)
+            self.text("Pulsa 1–9 o elige una casilla con el ratón.",345,600,(79,100,106),self.small)
+        else:
+            for i, option in enumerate(self.challenge_options):
+                rect=pygame.Rect(180+i*245,380,225,120)
+                self.panel(rect,(215,227,220),(16),(125,171,173))
+                self.text_wrapped(f"{i+1}. {option}",rect.x+15,rect.y+24,195,(43,71,75),self.small)
+                self.text("ELEGIR",rect.x+76,rect.bottom-29,(66,115,105),self.small)
+            self.text("Pulsa 1, 2 o 3; también puedes hacer clic.",365,535,(79,100,106),self.small)
+        self.text_wrapped(self.challenge_feedback,180,563,735,(135,84,71),self.small)
+        self.text("ESC  ·  Salir del reto",180,585,(102,110,108),self.small)
 
     def text_wrapped(self,value,x,y,width,color,font):
         line=""
@@ -305,24 +523,29 @@ class AlcaldeDigitalGame:
         shade=pygame.Surface((W,H),pygame.SRCALPHA); shade.fill((8,12,24,200)); self.screen.blit(shade,(0,0))
         self.panel((145,170,810,365),(246,240,221),24,(115,188,230))
         self.text("MAPA DE CIUDAD NOVA",190,198,(49,105,86),self.bold)
-        pygame.draw.line(self.screen,(120,144,139),(230,359),(858,359),6)
+        for i, color in enumerate(((129,177,137),(99,195,214),(173,136,218))):
+            left=230+i*210
+            pygame.draw.rect(self.screen,color,(left,346,198,25),border_radius=9)
+            self.text(ZONE_NAMES[i],left-5,315,(62,76,83),self.small)
+        pygame.draw.line(self.screen,(120,144,139),(230,359),(858,359),3)
         for n in self.terminals:
             x=230+int(n["x"]/WORLD_W*628)
             pygame.draw.circle(self.screen,MINT if n["done"] else GOLD,(x,359),16)
-            self.text(n["title"],x-33,390,(49,62,69),self.small)
+            pygame.draw.circle(self.screen,(40,62,68),(x,359),5)
         px=230+int(self.player.centerx/WORLD_W*628)
         pygame.draw.polygon(self.screen,CORAL,((px,327),(px-10,344),(px+10,344)))
-        self.text("Las estaciones con luz contienen una conversación y una decisión.",195,450,(65,81,86),self.small)
+        self.text("Resuelve el reto de cada cristal para descubrir mensajes.",195,450,(65,81,86),self.small)
         self.text("M o ESC para volver",195,489,(65,81,86),self.small)
 
     def draw_help(self):
         shade=pygame.Surface((W,H),pygame.SRCALPHA); shade.fill((8,12,24,205)); self.screen.blit(shade,(0,0))
         self.panel((190,160,720,400),(246,240,221),24,(115,188,230))
         self.text("AVENTURA Y CIUDADANÍA DIGITAL",230,191,(49,105,86),self.bold)
-        help_lines=["Recorre plataformas y conversa en las cuatro estaciones.",
+        help_lines=["Explora tres zonas; cambia el estilo de las plataformas al avanzar.",
+        "Resuelve el reto de cada cristal para encontrar una publicación.",
         "Verifica la fuente y el contexto antes de compartir.",
         "Los rumores son ecos: pulsa X para dispersarlos.",
-        "Mover: A/D o flechas   ·   Saltar: Espacio", "Investigar: E   ·   Pulso: X   ·   Mapa: M",
+        "Mover: A/D o flechas   ·   Saltar: Espacio", "Cristal: E   ·   Pulso: X   ·   Mapa: M",
         "Decisiones: V verificar · C compartir · R reportar · I ignorar", "H o ESC para cerrar"]
         for i,line in enumerate(help_lines): self.text(line,234,246+i*37,INK,self.small)
 
@@ -361,7 +584,7 @@ class AlcaldeDigitalGame:
             if w["hp"]<=0: continue
             w["x"]+=w["dir"]*48*dt
             if abs(w["x"]-w["home"])>75: w["dir"]*=-1
-            enemy=pygame.Rect(w["x"]-18,515,36,50)
+            enemy=pygame.Rect(w["x"]-46,456,92,116) if w.get("boss") else pygame.Rect(w["x"]-18,515,36,50)
             if self.player.colliderect(enemy) and not self.invulnerable:
                 self.health=max(0,self.health-1); self.invulnerable=1.1
                 self.vx=-self.facing*220; self.vy=-250
@@ -373,7 +596,8 @@ class AlcaldeDigitalGame:
         hit=pygame.Rect(self.player.right if self.facing>0 else self.player.left-62,self.player.y+10,62,38)
         hit=hit.move(-self.player.x if False else 0,0)
         for w in self.wisps:
-            if w["hp"]>0 and hit.colliderect(pygame.Rect(w["x"]-22,514,44,47)):
+            target=pygame.Rect(w["x"]-48,474,96,100) if w.get("boss") else pygame.Rect(w["x"]-22,514,44,47)
+            if w["hp"]>0 and hit.colliderect(target):
                 w["hp"]-=1; w["flash"]=.18
                 for _ in range(9): self.sparks.append([w["x"],535,random.uniform(-150,150),random.uniform(-220,-40),.35])
                 if w["hp"]<=0:
@@ -384,10 +608,12 @@ class AlcaldeDigitalGame:
         node=min(self.terminals,key=lambda n:abs(n["x"]-self.player.centerx))
         if abs(node["x"]-self.player.centerx)<100:
             if node["done"]: self.message="Ya investigaste esta publicación; explora hacia la siguiente luz."
+            elif not node["unlocked"]:
+                self.begin_challenge(node)
             else:
                 self.dialog=node; node["pub"].verified=None
                 self.message="Compara la fuente y el contexto antes de decidir."
-        else: self.message="Acércate a una estación iluminada para investigar."
+        else: self.message="Acércate a un cristal para activar su reto."
 
     def decide(self,action:str):
         node=self.dialog
@@ -426,6 +652,25 @@ class AlcaldeDigitalGame:
 
     def handle(self,event):
         if event.type==pygame.QUIT: self.running=False
+        elif self.dialog and self.dialog.get("stage") == "challenge":
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                x,y=event.pos
+                if self.challenge_node and self.challenge_node["challenge"] == "tic":
+                    if 400 <= x < 700 and 290 <= y < 590:
+                        col=(x-400)//100; row=(y-290)//100
+                        self.play_tic(int(row*3+col))
+                elif 380 <= y <= 510:
+                    for i in range(3):
+                        if 180+i*245 <= x <= 405+i*245:
+                            self.answer_challenge(i); break
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    self.dialog=None; self.challenge_node=None
+                elif pygame.K_1 <= event.key <= pygame.K_9 and self.challenge_node and self.challenge_node["challenge"] == "tic":
+                    self.play_tic(event.key-pygame.K_1)
+                elif event.key in (pygame.K_1,pygame.K_2,pygame.K_3):
+                    self.answer_challenge(event.key-pygame.K_1)
+            return
         elif event.type==pygame.KEYDOWN:
             if event.key==pygame.K_ESCAPE:
                 if self.dialog: self.dialog=None

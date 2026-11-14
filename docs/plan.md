@@ -8,8 +8,10 @@
 - [x] Enemigos de patrulla con daño, vida y ataque de pulso.
 - [x] Estaciones de conversación para investigar y decidir sobre publicaciones.
 - [x] Mapa de sala, HUD y ayuda con controles visibles.
+- [x] Expandir el recorrido a tres zonas conectadas con escenarios y estilos de plataforma distintos.
+- [x] Integrar animaciones cartoon de personaje, criaturas, plantas, guardián final y música ambiental.
+- [x] Convertir las estaciones en cristales interactivos con retos de aritmética, reconocimiento de fuentes y tres en raya.
 - [ ] Desbloqueo de dash y rutas nuevas entre zonas conectadas por un grafo.
-- [ ] Animaciones dibujadas y audio propios; ahora el avatar y efectos se dibujan con formas.
 
 La guía suministrada se usa como referencia técnica de movimiento, legibilidad, cámara limitada, patrones de enemigos, exploración por habilidades y alcance incremental. La temática, personajes, nombres, visuales y retos de este juego son propios de Ciudad Nova.
 
@@ -26,7 +28,7 @@ La guía suministrada se usa como referencia técnica de movimiento, legibilidad
 
 - [x] Modelar relaciones sociales con lista de adyacencia.
 - [x] Recorrer la red mediante BFS y usar alcance en la mecánica de compartir.
-- [ ] Añadir grafo de zonas de Ciudad Nova y navegación entre ubicaciones.
+- [x] Añadir tres zonas de Ciudad Nova recorridas con cámara lateral.
 - [ ] Representar difusión en pantalla paso a paso y calcular velocidad/turnos de propagación.
 - [ ] Añadir operaciones del grafo y explicar su complejidad durante la sustentación.
 
