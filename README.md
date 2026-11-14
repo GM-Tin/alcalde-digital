@@ -40,7 +40,7 @@ El árbol binario `DecisionNode` representa las decisiones (verificar → compar
 
 ## Git
 
-El repositorio local queda organizado para trabajo distribuido por módulos. Aún no hay remoto GitHub: se puede conectar con `git remote add origin <URL>` cuando el equipo cree el repositorio. Cada integrante debe trabajar en una rama o módulo identificable y registrar commits propios, tal como pide el laboratorio.
+El repositorio remoto privado es [GM-Tin/alcalde-digital](https://github.com/GM-Tin/alcalde-digital). La primera publicación web incluyó este README, `requirements.txt` y `.gitignore`; los módulos del juego y la documentación siguen en el checkout local hasta completar la sincronización. Cada integrante debe trabajar en una rama o módulo identificable y registrar commits propios, tal como pide el laboratorio.
 
 ## Investigación y requisitos
 
