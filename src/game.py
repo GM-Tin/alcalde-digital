@@ -32,7 +32,7 @@ class AlcaldeDigitalGame:
         self.face_right = True
         self.walk_frame = 0
         self.message = "Muévete por Ciudad Nova y ayuda a que la información llegue con cuidado."
-        self.publication = random.choice(PUBLICATIONS)
+        self.publication = self.new_publication()
         self.round_log: list[str] = []
         self.recent_reach = 0
         self.recent_event = ""
@@ -42,6 +42,11 @@ class AlcaldeDigitalGame:
 
     def text(self, value: str, x: int, y: int, color=INK, font=None) -> None:
         self.screen.blit((font or self.font).render(value, True, color), (x, y))
+
+    @staticmethod
+    def new_publication() -> Publication:
+        source = random.choice(PUBLICATIONS)
+        return Publication(source.text, source.true, source.source)
 
     def rounded(self, rect, color, radius=16, border=None):
         pygame.draw.rect(self.screen, color, rect, border_radius=radius)
@@ -65,9 +70,9 @@ class AlcaldeDigitalGame:
         self.text("PLAZA", 595, 128, (136, 100, 37), self.small)
         pygame.draw.circle(self.screen, (239, 177, 81), (625, 196), 25)
         # Buildings
-        self.draw_building(250, 132, 150, 180, (244, 164, 130), "COLEGIO", "🏫")
-        self.draw_building(540, 350, 155, 155, (155, 184, 226), "BARRIO", "⌂")
-        self.draw_building(45, 365, 165, 130, (222, 167, 213), "CENTRO CÍVICO", "✦")
+        self.draw_building(250, 132, 150, 180, (244, 164, 130), "COLEGIO", "C")
+        self.draw_building(540, 350, 155, 155, (155, 184, 226), "BARRIO", "B")
+        self.draw_building(45, 365, 165, 130, (222, 167, 213), "CENTRO CÍVICO", "+")
         # Citizen nodes, illustrating the social graph
         positions = {"Ana": (290, 350), "Luis": (360, 450), "Pedro": (570, 320),
                      "Carlos": (225, 490), "María": (635, 300), "Sofía": (600, 430),
@@ -215,13 +220,13 @@ class AlcaldeDigitalGame:
                 self.state.change(coexistence=3, digital_wellbeing=2)
             elif "verdadera" in event:
                 self.state.change(verified_info=2, trust=1)
-            elif "Rumor" in event:
+            elif "rumor" in event.lower():
                 self.state.change(misinformation=3)
             else:
                 self.state.change(conflicts=2, coexistence=-1)
             self.message += " Evento: " + event
         self.state.round_number += 1
-        self.publication = random.choice(PUBLICATIONS)
+        self.publication = self.new_publication()
 
     def handle(self, event) -> None:
         if event.type == pygame.QUIT:
