@@ -1,5 +1,18 @@
 # Plan de desarrollo por entregas
 
+## Entrega 1.1: aventura lateral inspirada en metroidvanias
+
+- [x] Cambiar el recorrido de arriba abajo por una sala lateral de plataformas.
+- [x] Movimiento con aceleración, salto variable, gravedad diferenciada y coyote time.
+- [x] Cámara horizontal con límites y composición de fondos en capas.
+- [x] Enemigos de patrulla con daño, vida y ataque de pulso.
+- [x] Estaciones de conversación para investigar y decidir sobre publicaciones.
+- [x] Mapa de sala, HUD y ayuda con controles visibles.
+- [ ] Desbloqueo de dash y rutas nuevas entre zonas conectadas por un grafo.
+- [ ] Animaciones dibujadas y audio propios; ahora el avatar y efectos se dibujan con formas.
+
+La guía suministrada se usa como referencia técnica de movimiento, legibilidad, cámara limitada, patrones de enemigos, exploración por habilidades y alcance incremental. La temática, personajes, nombres, visuales y retos de este juego son propios de Ciudad Nova.
+
 ## Entrega 1: árbol + experiencia base
 
 - [x] Crear ciclo jugable con escena 2D y HUD.
