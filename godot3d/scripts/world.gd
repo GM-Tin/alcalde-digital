@@ -1508,7 +1508,7 @@ func _show_menu_page(page: String) -> void:
 		home_style.border_color = Color(0, 0, 0, 0)
 		home_style.set_border_width_all(0)
 		menu_panel.add_theme_stylebox_override("panel", home_style)
-		menu_content.add_theme_constant_override("separation", 8)
+		menu_content.add_theme_constant_override("separation", 4)
 	else:
 		menu_panel.offset_left = -390
 		menu_panel.offset_top = -340
@@ -1528,15 +1528,12 @@ func _show_menu_page(page: String) -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_style_cartoon_text(title, 42)
 	title.add_theme_color_override("font_color", Color("fff0bd"))
-	if page != "tutorial":
+	if page == "home":
+		_add_welcome_header(title)
+	elif page != "tutorial":
 		menu_content.add_child(title)
 	match page:
 		"home":
-			title.text = "BIENVENIDO AL REINO"
-			_add_menu_label("ALCALDE DIGITAL · CIUDAD EN RED", 17)
-			var home_spacer := Control.new()
-			home_spacer.custom_minimum_size = Vector2(1, 6)
-			menu_content.add_child(home_spacer)
 			_add_image_menu_button("JUGAR", 0, func(): _show_menu_page("mode"))
 			_add_image_menu_button("TUTORIAL", 1, func(): _show_menu_page("tutorial"))
 			_add_image_menu_button("AJUSTES", 2, func(): _show_menu_page("settings"))
@@ -1639,6 +1636,47 @@ func _add_menu_label(message: String, size: int) -> void:
 	_style_cartoon_text(label, size + 5)
 	label.add_theme_color_override("font_color", Color("f7f2df"))
 	menu_content.add_child(label)
+
+func _add_welcome_header(title: Label) -> void:
+	# A compact illustrated crest keeps the welcome copy clear of the button art.
+	var header := Control.new()
+	header.name = "WelcomeHeader"
+	header.custom_minimum_size = Vector2(620, 140)
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var banner := TextureRect.new()
+	banner.texture = load("res://assets/ui/welcome_banner.png") as Texture2D
+	banner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	banner.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	banner.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header.add_child(banner)
+	title.text = "¡BIENVENIDO AL REINO!"
+	title.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	title.offset_left = 18
+	title.offset_right = -18
+	title.offset_top = 56
+	title.offset_bottom = -44
+	title.add_theme_font_size_override("font_size", 32)
+	title.add_theme_color_override("font_color", Color("fff1bb"))
+	title.add_theme_constant_override("outline_size", 3)
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header.add_child(title)
+	var subtitle := Label.new()
+	subtitle.text = "ALCALDE DIGITAL · CIUDAD EN RED"
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	subtitle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	subtitle.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	subtitle.offset_left = 18
+	subtitle.offset_right = -18
+	subtitle.offset_top = 94
+	subtitle.offset_bottom = -16
+	_style_cartoon_text(subtitle, 15)
+	subtitle.add_theme_color_override("font_color", Color("70421c"))
+	subtitle.add_theme_color_override("font_outline_color", Color("fff1cf"))
+	subtitle.add_theme_constant_override("outline_size", 1)
+	subtitle.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header.add_child(subtitle)
+	menu_content.add_child(header)
 
 func _style_cartoon_text(control: Control, font_size: int) -> void:
 	control.add_theme_font_override("font", CARTOON_FONT)
@@ -1759,7 +1797,7 @@ func _add_image_menu_button(caption: String, atlas_index: int, callback: Callabl
 	var button := Button.new()
 	button.name = "ImageButton_%s" % caption.to_pascal_case()
 	button.focus_mode = Control.FOCUS_ALL
-	button.custom_minimum_size = Vector2(535, 178)
+	button.custom_minimum_size = Vector2(535, 166)
 	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	button.mouse_filter = Control.MOUSE_FILTER_STOP
 	button.text = ""
@@ -1772,8 +1810,13 @@ func _add_image_menu_button(caption: String, atlas_index: int, callback: Callabl
 	button.add_theme_stylebox_override("focus", hover_style)
 	_add_extruded_button_text(button, caption, 39)
 	button.pressed.connect(callback)
-	button.mouse_entered.connect(func(): _animate_image_menu_button(button, Color(1.1, 1.06, 0.94)))
-	button.mouse_exited.connect(func(): _animate_image_menu_button(button, Color.WHITE))
+	button.resized.connect(func(): button.pivot_offset = button.size / 2.0)
+	button.mouse_entered.connect(func(): _animate_image_menu_button(button, Color(1.1, 1.06, 0.94), Vector2(1.025, 1.025)))
+	button.mouse_exited.connect(func(): _animate_image_menu_button(button, Color.WHITE, Vector2.ONE))
+	button.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+			_animate_image_menu_button(button, Color(0.9, 0.82, 0.66) if event.pressed else Color(1.1, 1.06, 0.94), Vector2(0.97, 0.97) if event.pressed else Vector2.ONE)
+	)
 	menu_content.add_child(button)
 
 func _add_extruded_button_text(button: Button, caption: String, lettering_size: int = 39) -> void:
@@ -1829,12 +1872,13 @@ func _make_button_image_style(plaque: AtlasTexture, tint: Color) -> StyleBoxText
 	style.content_margin_bottom = 8.0
 	return style
 
-func _animate_image_menu_button(button: Button, target_tint: Color) -> void:
+func _animate_image_menu_button(button: Button, target_tint: Color, target_scale: Vector2 = Vector2.ONE) -> void:
 	if not is_instance_valid(button):
 		return
 	var tween := create_tween()
 	tween.set_ease(Tween.EASE_OUT)
 	tween.parallel().tween_property(button, "modulate", target_tint, 0.12)
+	tween.parallel().tween_property(button, "scale", target_scale, 0.12)
 
 func _add_tutorial_card(icon_text: String, description: String) -> void:
 	var row := HBoxContainer.new()
