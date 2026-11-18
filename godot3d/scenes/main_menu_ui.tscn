@@ -1,0 +1,345 @@
+[gd_scene format=3 uid="uid://ds2n37cu8c8iv"]
+
+[ext_resource type="Script" uid="uid://ybhvauhd2s3p" path="res://scripts/main_menu_ui.gd" id="1_script"]
+[ext_resource type="Texture2D" uid="uid://mry0npm8kged" path="res://assets/ui/medieval_menu_background.png" id="2_background"]
+[ext_resource type="Texture2D" uid="uid://dbmnaem132tck" path="res://assets/ui/welcome_banner.png" id="3_banner"]
+[ext_resource type="FontFile" uid="uid://dofxaqxkm70c2" path="res://assets/ui/fonts/LilitaOne-Regular.ttf" id="4_font"]
+[ext_resource type="Texture2D" uid="uid://biwwas3k6mtdh" path="res://assets/ui/medieval_buttons_atlas.png" id="5_buttons"]
+
+[sub_resource type="AtlasTexture" id="PlayPlaque"]
+atlas = ExtResource("5_buttons")
+region = Rect2(280, 25, 970, 345)
+
+[sub_resource type="AtlasTexture" id="TutorialPlaque"]
+atlas = ExtResource("5_buttons")
+region = Rect2(280, 372, 970, 328)
+
+[sub_resource type="AtlasTexture" id="SettingsPlaque"]
+atlas = ExtResource("5_buttons")
+region = Rect2(280, 704, 970, 312)
+
+
+[node name="MainMenuUI" type="Control" unique_id=1323152649]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Background" type="TextureRect" parent="." unique_id=1618023253]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("2_background")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Shade" type="ColorRect" parent="." unique_id=328316788]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.04, 0.07, 0.13, 0.34)
+
+[node name="HomeScreen" type="Control" parent="." unique_id=2113423815]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="HomePanel" type="Control" parent="HomeScreen" unique_id=225918325]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -400.0
+offset_top = -390.0
+offset_right = 400.0
+offset_bottom = 390.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MenuContent" type="Control" parent="HomeScreen/HomePanel" unique_id=1395676307]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="WelcomeHeader" type="Control" parent="HomeScreen/HomePanel/MenuContent" unique_id=301209072]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -370.0
+offset_top = -375.0
+offset_right = 370.0
+offset_bottom = -145.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Banner" type="TextureRect" parent="HomeScreen/HomePanel/MenuContent/WelcomeHeader" unique_id=736476247]
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 1.0680001
+anchor_bottom = 1.1850001
+offset_left = -26.0
+offset_top = 5.0
+offset_right = -7.3200684
+offset_bottom = -23.550018
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("3_banner")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="WelcomeTitleShadow" type="Label" parent="HomeScreen/HomePanel/MenuContent/WelcomeHeader" unique_id=2143984672]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 21.0
+offset_top = 131.0
+offset_right = -15.0
+offset_bottom = -45.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.247, 0.086, 0.027, 1)
+theme_override_colors/font_outline_color = Color(0.247, 0.086, 0.027, 1)
+theme_override_constants/outline_size = 6
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 44
+text = "¡BIENVENIDO AL REINO!"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="WelcomeTitleGoldDepth" type="Label" parent="HomeScreen/HomePanel/MenuContent/WelcomeHeader" unique_id=1022668034]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 21.0
+offset_top = 127.0
+offset_right = -15.0
+offset_bottom = -49.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.831, 0.392, 0.063, 1)
+theme_override_colors/font_outline_color = Color(0.443, 0.176, 0.043, 1)
+theme_override_constants/outline_size = 5
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 44
+text = "¡BIENVENIDO AL REINO!"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="WelcomeTitle" type="Label" parent="HomeScreen/HomePanel/MenuContent/WelcomeHeader" unique_id=751719938]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 18.0
+offset_top = 125.0
+offset_right = -14.0
+offset_bottom = -51.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 0.945, 0.733, 1)
+theme_override_colors/font_shadow_color = Color(0.16, 0.067, 0.027, 0.94)
+theme_override_colors/font_outline_color = Color(0.224, 0.125, 0.047, 1)
+theme_override_constants/shadow_offset_x = 3
+theme_override_constants/shadow_offset_y = 4
+theme_override_constants/outline_size = 3
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 44
+text = "¡BIENVENIDO AL REINO!"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="WelcomeSubtitleShadow" type="Label" parent="HomeScreen/HomePanel/MenuContent/WelcomeHeader" unique_id=1385068056]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 69.0
+offset_top = 992.0
+offset_right = 33.0
+offset_bottom = 808.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.247, 0.086, 0.027, 1)
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 18
+text = "ALCALDE DIGITAL · CIUDAD EN RED"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="WelcomeSubtitle" type="Label" parent="HomeScreen/HomePanel/MenuContent/WelcomeHeader" unique_id=646693642]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -254.0
+offset_top = 965.0
+offset_right = -290.0
+offset_bottom = 799.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.439, 0.259, 0.11, 1)
+theme_override_colors/font_shadow_color = Color(0.31, 0.157, 0.059, 0.9)
+theme_override_colors/font_outline_color = Color(1, 0.945, 0.812, 1)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 3
+theme_override_constants/outline_size = 1
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 18
+text = "ALCALDE DIGITAL · CIUDAD EN RED"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="PlayButton" type="TextureButton" parent="HomeScreen/HomePanel/MenuContent" unique_id=384948437]
+custom_minimum_size = Vector2(560, 140)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -279.0
+offset_top = -159.0
+offset_right = 281.0
+offset_bottom = 21.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(280, 70)
+mouse_filter = 2
+texture_normal = SubResource("PlayPlaque")
+texture_pressed = SubResource("PlayPlaque")
+texture_hover = SubResource("PlayPlaque")
+texture_focused = SubResource("PlayPlaque")
+ignore_texture_size = true
+stretch_mode = 0
+
+[node name="Text" type="Label" parent="HomeScreen/HomePanel/MenuContent/PlayButton" unique_id=124648745]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 3.0
+offset_top = 51.0
+offset_right = 3.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 0.941, 0.741, 1)
+theme_override_colors/font_outline_color = Color(0.388, 0.188, 0.059, 1)
+theme_override_constants/outline_size = 2
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 39
+text = "JUGAR"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+
+[node name="TutorialButton" type="TextureButton" parent="HomeScreen/HomePanel/MenuContent" unique_id=637032970]
+custom_minimum_size = Vector2(560, 140)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -277.0
+offset_top = 22.0
+offset_right = 283.0
+offset_bottom = 203.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(280, 70)
+mouse_filter = 2
+texture_normal = SubResource("TutorialPlaque")
+texture_pressed = SubResource("TutorialPlaque")
+texture_hover = SubResource("TutorialPlaque")
+texture_focused = SubResource("TutorialPlaque")
+ignore_texture_size = true
+stretch_mode = 0
+
+[node name="Text" type="Label" parent="HomeScreen/HomePanel/MenuContent/TutorialButton" unique_id=69610209]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -2.0
+offset_top = 23.0
+offset_right = -2.0
+offset_bottom = 23.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 0.941, 0.741, 1)
+theme_override_colors/font_outline_color = Color(0.388, 0.188, 0.059, 1)
+theme_override_constants/outline_size = 2
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 39
+text = "TUTORIAL"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="SettingsButton" type="TextureButton" parent="HomeScreen/HomePanel/MenuContent" unique_id=1167958583]
+custom_minimum_size = Vector2(560, 140)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -280.0
+offset_top = 196.0
+offset_right = 280.0
+offset_bottom = 374.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(280, 70)
+mouse_filter = 2
+texture_normal = SubResource("SettingsPlaque")
+texture_pressed = SubResource("SettingsPlaque")
+texture_hover = SubResource("SettingsPlaque")
+texture_focused = SubResource("SettingsPlaque")
+ignore_texture_size = true
+stretch_mode = 0
+
+[node name="Text" type="Label" parent="HomeScreen/HomePanel/MenuContent/SettingsButton" unique_id=1572245458]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -1.0
+offset_top = 59.0
+offset_right = -1.0
+offset_bottom = -26.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 0.941, 0.741, 1)
+theme_override_colors/font_outline_color = Color(0.388, 0.188, 0.059, 1)
+theme_override_constants/outline_size = 2
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 39
+text = "AJUSTES"
+horizontal_alignment = 1
+vertical_alignment = 1

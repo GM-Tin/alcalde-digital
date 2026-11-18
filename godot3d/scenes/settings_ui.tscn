@@ -1,0 +1,318 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/settings_ui.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://assets/ui/medieval_menu_background.png" id="2_background"]
+[ext_resource type="Texture2D" path="res://assets/ui/medieval_buttons_atlas.png" id="3_buttons"]
+[ext_resource type="FontFile" path="res://assets/ui/fonts/LilitaOne-Regular.ttf" id="4_font"]
+
+[sub_resource type="AtlasTexture" id="BackPlaque"]
+atlas = ExtResource("3_buttons")
+region = Rect2(280, 372, 970, 328)
+
+[sub_resource type="AtlasTexture" id="CrestPlaque"]
+atlas = ExtResource("3_buttons")
+region = Rect2(280, 372, 970, 328)
+
+[sub_resource type="AtlasTexture" id="WoodPlaque"]
+atlas = ExtResource("3_buttons")
+region = Rect2(280, 25, 970, 345)
+
+[node name="SettingsUI" type="Control"]
+custom_minimum_size = Vector2(816, 630)
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_script")
+
+[node name="EditorPreview" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Background" type="TextureRect" parent="EditorPreview"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_background")
+expand_mode = 1
+stretch_mode = 6
+mouse_filter = 2
+
+[node name="Shade" type="ColorRect" parent="EditorPreview"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.04, 0.07, 0.13, 0.58)
+mouse_filter = 2
+
+[node name="Content" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="TitlePlaque" type="TextureRect" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 38.0
+offset_top = -6.0
+offset_right = 778.0
+offset_bottom = 124.0
+mouse_filter = 2
+texture = SubResource("CrestPlaque")
+expand_mode = 1
+stretch_mode = 0
+
+[node name="VolumePlaque" type="TextureRect" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 78.0
+offset_top = 127.0
+offset_right = 738.0
+offset_bottom = 242.0
+mouse_filter = 2
+texture = SubResource("WoodPlaque")
+expand_mode = 1
+stretch_mode = 0
+visible = false
+
+[node name="LightsPlaque" type="TextureRect" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 78.0
+offset_top = 249.0
+offset_right = 738.0
+offset_bottom = 364.0
+mouse_filter = 2
+texture = SubResource("WoodPlaque")
+expand_mode = 1
+stretch_mode = 0
+visible = false
+
+[node name="ScalePlaque" type="TextureRect" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 78.0
+offset_top = 369.0
+offset_right = 738.0
+offset_bottom = 484.0
+mouse_filter = 2
+texture = SubResource("WoodPlaque")
+expand_mode = 1
+stretch_mode = 0
+visible = false
+
+[node name="OptionsCard" type="Panel" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 88.0
+offset_top = 132.0
+offset_right = 728.0
+offset_bottom = 468.0
+mouse_filter = 2
+z_index = -1
+
+[node name="VolumeDivider" type="ColorRect" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 128.0
+offset_top = 236.0
+offset_right = 688.0
+offset_bottom = 238.0
+mouse_filter = 2
+color = Color(0.86, 0.64, 0.28, 0.52)
+
+[node name="LightsDivider" type="ColorRect" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 128.0
+offset_top = 330.0
+offset_right = 688.0
+offset_bottom = 332.0
+mouse_filter = 2
+color = Color(0.86, 0.64, 0.28, 0.52)
+
+[node name="TitleShadow" type="Label" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 28.0
+offset_top = 34.0
+offset_right = 788.0
+offset_bottom = 98.0
+theme_override_colors/font_color = Color(0.247, 0.086, 0.027, 1)
+theme_override_colors/font_outline_color = Color(0.247, 0.086, 0.027, 1)
+theme_override_constants/outline_size = 6
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 46
+text = "AJUSTES"
+horizontal_alignment = 1
+vertical_alignment = 1
+mouse_filter = 2
+
+[node name="TitleGoldDepth" type="Label" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 28.0
+offset_top = 30.0
+offset_right = 788.0
+offset_bottom = 94.0
+theme_override_colors/font_color = Color(0.831, 0.392, 0.063, 1)
+theme_override_colors/font_outline_color = Color(0.443, 0.176, 0.043, 1)
+theme_override_constants/outline_size = 5
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 46
+text = "AJUSTES"
+horizontal_alignment = 1
+vertical_alignment = 1
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 28.0
+offset_top = 26.0
+offset_right = 788.0
+offset_bottom = 90.0
+theme_override_colors/font_color = Color(1, 0.941, 0.741, 1)
+theme_override_colors/font_outline_color = Color(0.224, 0.125, 0.047, 1)
+theme_override_constants/outline_size = 3
+theme_override_constants/shadow_offset_x = 3
+theme_override_constants/shadow_offset_y = 4
+theme_override_colors/font_shadow_color = Color(0.16, 0.067, 0.027, 0.94)
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 46
+text = "AJUSTES"
+horizontal_alignment = 1
+vertical_alignment = 1
+mouse_filter = 2
+
+[node name="VolumeLabel" type="Label" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 128.0
+offset_top = 148.0
+offset_right = 678.0
+offset_bottom = 184.0
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 25
+text = "Volumen general"
+vertical_alignment = 1
+mouse_filter = 2
+
+[node name="VolumeSlider" type="HSlider" parent="Content"]
+custom_minimum_size = Vector2(620, 46)
+layout_mode = 1
+anchors_preset = 0
+offset_left = 128.0
+offset_top = 188.0
+offset_right = 678.0
+offset_bottom = 224.0
+min_value = 0.0
+max_value = 1.0
+step = 0.05
+value = 0.8
+
+[node name="LightsToggle" type="CheckButton" parent="Content"]
+custom_minimum_size = Vector2(76, 48)
+layout_mode = 1
+anchors_preset = 0
+offset_left = 612.0
+offset_top = 267.0
+offset_right = 688.0
+offset_bottom = 315.0
+theme_override_fonts/font = ExtResource("4_font")
+text = ""
+
+[node name="LightsLabel" type="Label" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 128.0
+offset_top = 254.0
+offset_right = 578.0
+offset_bottom = 286.0
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 25
+text = "Luces nocturnas"
+vertical_alignment = 2
+mouse_filter = 2
+
+[node name="LightsDescription" type="Label" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 128.0
+offset_top = 286.0
+offset_right = 578.0
+offset_bottom = 318.0
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 17
+text = "Luciérnagas e iluminación ambiental"
+vertical_alignment = 1
+mouse_filter = 2
+
+[node name="ScaleLabel" type="Label" parent="Content"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 128.0
+offset_top = 350.0
+offset_right = 678.0
+offset_bottom = 382.0
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 25
+text = "Escala de interfaz"
+vertical_alignment = 1
+mouse_filter = 2
+
+[node name="ScalePicker" type="OptionButton" parent="Content"]
+custom_minimum_size = Vector2(620, 58)
+layout_mode = 1
+anchors_preset = 0
+offset_left = 128.0
+offset_top = 388.0
+offset_right = 678.0
+offset_bottom = 440.0
+[node name="BackButton" type="TextureButton" parent="Content"]
+custom_minimum_size = Vector2(560, 140)
+layout_mode = 1
+anchors_preset = 0
+offset_left = 128.0
+offset_top = 488.0
+offset_right = 688.0
+offset_bottom = 628.0
+mouse_filter = 2
+texture_normal = SubResource("BackPlaque")
+texture_pressed = SubResource("BackPlaque")
+texture_hover = SubResource("BackPlaque")
+texture_focused = SubResource("BackPlaque")
+ignore_texture_size = true
+stretch_mode = 0
+
+[node name="Text" type="Label" parent="Content/BackButton"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 16.0
+offset_bottom = 16.0
+theme_override_colors/font_color = Color(1, 0.941, 0.741, 1)
+theme_override_colors/font_outline_color = Color(0.224, 0.125, 0.047, 1)
+theme_override_constants/outline_size = 3
+theme_override_constants/shadow_offset_x = 3
+theme_override_constants/shadow_offset_y = 4
+theme_override_colors/font_shadow_color = Color(0.16, 0.067, 0.027, 0.94)
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 37
+text = "VOLVER"
+horizontal_alignment = 1
+vertical_alignment = 1
+mouse_filter = 2

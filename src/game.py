@@ -40,6 +40,8 @@ class AlcaldeDigitalGame:
         self.boss_walk_frames = self.load_boss_frames("walk")
         self.plant_frames = self.load_animation("mossy-cavern/Plant Animations/Plant Animations/Plant 1", "Plant1")
         self.platform_art = self.load_platform_art()
+        self.background_layers = self.load_background_layers()
+        self.ground_art = self.load_ground_art()
         self.music_enabled = self.start_ambient_music()
         self.tree = DecisionTree()
         self.player = pygame.Rect(90, 516, 34, 52)
@@ -151,6 +153,44 @@ class AlcaldeDigitalGame:
         except (pygame.error, ValueError):
             return None
 
+    def load_background_layers(self) -> list[tuple[pygame.Surface, float]]:
+        """Capas pintadas del bosque; el factor menor se mueve más despacio."""
+        root = Path(__file__).resolve().parent.parent / "assets/art/digitalmoons/source/Parallax Forest Background (Seamless)/Parallax Forest Background - Blue"
+        names = ("10_Sky", "09_Forest", "08_Forest", "07_Forest", "06_Forest",
+                 "05_Particles", "04_Forest", "03_Particles", "02_Bushes", "01_Mist")
+        # Dibujamos de atrás hacia adelante; las capas originales son 1920x1080.
+        factors = (.015, .025, .04, .06, .085, .11, .14, .18, .23, .28)
+        layers = []
+        for name, factor in zip(names, factors):
+            path = root / f"{name}.png"
+            try:
+                image = pygame.image.load(str(path)).convert_alpha()
+                image = pygame.transform.smoothscale(image, (1280, 720))
+                if name == "01_Mist":
+                    image.set_alpha(145)
+                layers.append((image, factor))
+            except (pygame.error, OSError):
+                continue
+        return layers
+
+    def load_ground_art(self) -> pygame.Surface | None:
+        """Arte de suelo del paquete Mossy Cavern ya usado por el resto del juego."""
+        path = self.asset_root / "mossy-cavern/Mossy Assets/Mossy Tileset/Mossy - FloatingPlatforms.png"
+        try:
+            sheet = pygame.image.load(str(path)).convert_alpha()
+            area = sheet.subsurface(pygame.Rect(440, 0, 1100, 500)).copy()
+            bounds = area.get_bounding_rect(min_alpha=12)
+            if not bounds.width or not bounds.height:
+                return None
+            platform = area.subsurface(bounds).copy()
+            # Solo la corona vegetal; no usamos el interior negro de la isla.
+            cap = pygame.Rect(0, 0, platform.get_width(), min(155, platform.get_height()))
+            cap_art = platform.subsurface(cap).copy()
+            cap_bounds = cap_art.get_bounding_rect(min_alpha=12)
+            return cap_art.subsurface(cap_bounds).copy() if cap_bounds.width and cap_bounds.height else None
+        except (pygame.error, ValueError):
+            return None
+
     def start_ambient_music(self) -> bool:
         music = Path(__file__).resolve().parent.parent / "assets/audio/ciudad_nova_ambience.ogg"
         if not music.exists():
@@ -184,30 +224,55 @@ class AlcaldeDigitalGame:
         )
         sky, far, near, accent = palettes[zone]
         self.screen.fill(sky)
-        # Siluetas y luces cambian al cruzar a otra región.
-        for layer, (color, factor, base) in enumerate(((far, .12, 450), (near, .25, 505))):
-            offset = int(self.camera * factor)
-            for i in range(-1, 7):
-                x = i * 260 - offset % 260
-                pygame.draw.polygon(self.screen, color, [(x, base), (x+70, base-95-layer*28),
-                    (x+150, base-30), (x+220, base-130-layer*22), (x+280, base)])
-        # Distant windows and stars.
-        for i in range(46):
-            x = (i * 137 - int(self.camera*.16)) % W
-            y = 45 + (i*71) % 290
-            pygame.draw.circle(self.screen, accent, (x, y), 1 + i % 2)
+        if self.background_layers:
+            for image, factor in self.background_layers:
+                offset = int(self.camera * factor) % image.get_width()
+                self.screen.blit(image, (-offset, 0))
+                self.screen.blit(image, (image.get_width()-offset, 0))
+        else:
+            # Fallback si se inicia sin descargar el paquete gráfico.
+            for layer, (color, factor, base) in enumerate(((far, .12, 450), (near, .25, 505))):
+                offset = int(self.camera * factor)
+                for i in range(-1, 7):
+                    x = i * 260 - offset % 260
+                    pygame.draw.polygon(self.screen, color, [(x, base), (x+70, base-95-layer*28),
+                        (x+150, base-30), (x+220, base-130-layer*22), (x+280, base)])
+            for i in range(46):
+                x = (i * 137 - int(self.camera*.16)) % W
+                y = 45 + (i*71) % 290
+                pygame.draw.circle(self.screen, accent, (x, y), 1 + i % 2)
+        # Tinte tenue por zona para preservar la lectura de las plataformas.
+        tint = ((30, 66, 42, 35), (26, 64, 97, 40), (71, 35, 104, 48))[zone]
+        overlay = pygame.Surface((W, H), pygame.SRCALPHA)
+        overlay.fill(tint)
+        self.screen.blit(overlay, (0, 0))
         for rect in self.platforms:
             view = rect.move(-int(self.camera), 0)
             if view.right < -10 or view.left > W+10:
                 continue
             region = min(2, rect.centerx // ZONE_W)
             if rect.height >= 100:
-                ground_colors=((43,66,58),(37,51,75),(52,43,74))
-                top_colors=((96,153,104),(105,198,211),(157,116,184))
+                ground_colors=((30,48,43),(27,39,58),(40,31,59))
+                top_colors=((104,165,113),(105,198,211),(174,137,202))
                 pygame.draw.rect(self.screen,ground_colors[region],view)
-                pygame.draw.rect(self.screen,top_colors[region],(view.x,view.y,view.w,13),border_radius=5)
-                for gx in range(view.x+24,view.right-8,72):
-                    pygame.draw.line(self.screen,tuple(min(255,c+18) for c in ground_colors[region]),(gx,view.y+27),(gx+17,view.y+39),2)
+                pygame.draw.rect(self.screen,top_colors[region],(view.x,view.y+3,view.w,5),border_radius=3)
+                if self.ground_art:
+                    # Enmarca cada tramo con el arte pintado, conserva su zona interior
+                    # oscura como roca y tiñe suavemente según el bioma.
+                    art_h = min(view.h, max(58, min(78, view.w // 7)))
+                    art = pygame.transform.smoothscale(self.ground_art, (view.w, art_h))
+                    art.set_alpha(235)
+                    self.screen.blit(art, (view.x, view.y-8))
+                # Variación mineral sutil bajo el borde de musgo.
+                rng=random.Random(rect.x+region*7919)
+                for _ in range(max(7,view.w//24)):
+                    gx=rng.randint(view.x+8,max(view.x+8,view.right-26))
+                    gy=rng.randint(view.y+23,min(view.bottom-8,view.y+view.h-14))
+                    width=rng.randint(8,24)
+                    stone=tuple(min(255,c+rng.randint(8,20)) for c in ground_colors[region])
+                    pygame.draw.ellipse(self.screen,stone,(gx,gy,width,6))
+                    pygame.draw.line(self.screen,tuple(min(255,c+8) for c in stone),
+                                     (gx+3,gy+2),(gx+width-4,gy+2),1)
                 if region==1:
                     for gx in range(view.x+50,view.right-20,145):
                         pygame.draw.polygon(self.screen,(75,130,163),((gx-9,view.y),(gx,view.y-22),(gx+9,view.y)))

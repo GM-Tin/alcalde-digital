@@ -76,6 +76,9 @@ func _input(event: InputEvent) -> void:
 		if look_pivot:
 			look_pivot.rotation.x = look_pitch
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE:
+		# Let visible gameplay UI controls receive clicks instead of recapturing the pointer.
+		if get_viewport().gui_get_hovered_control() != null:
+			return
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED else Input.MOUSE_MODE_CAPTURED

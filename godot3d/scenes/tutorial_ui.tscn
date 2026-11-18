@@ -1,0 +1,146 @@
+[gd_scene format=3 uid="uid://cp6jp747lo06x"]
+
+[ext_resource type="Script" uid="uid://dpjk1cktoegeg" path="res://scripts/tutorial_ui.gd" id="1_script"]
+[ext_resource type="Texture2D" uid="uid://mry0npm8kged" path="res://assets/ui/medieval_menu_background.png" id="2_background"]
+[ext_resource type="Texture2D" uid="uid://bevfqyc8n5x6e" path="res://assets/ui/tutorial_controls.png" id="3_tutorial"]
+[ext_resource type="Texture2D" uid="uid://biwwas3k6mtdh" path="res://assets/ui/medieval_buttons_atlas.png" id="4_buttons"]
+[ext_resource type="FontFile" uid="uid://dofxaqxkm70c2" path="res://assets/ui/fonts/LilitaOne-Regular.ttf" id="5_font"]
+
+[sub_resource type="AtlasTexture" id="BackPlaque"]
+atlas = ExtResource("4_buttons")
+region = Rect2(280, 372, 970, 328)
+
+[node name="TutorialUI" type="Control" unique_id=431123108]
+custom_minimum_size = Vector2(1040, 560)
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_script")
+
+[node name="EditorPreview" type="Control" parent="." unique_id=804473166]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Background" type="TextureRect" parent="EditorPreview" unique_id=2056771966]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("2_background")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Shade" type="ColorRect" parent="EditorPreview" unique_id=484488746]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.04, 0.07, 0.13, 0.58)
+
+[node name="Content" type="Control" parent="." unique_id=1519854825]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="TutorialArt" type="TextureRect" parent="Content" unique_id=44973579]
+custom_minimum_size = Vector2(1040, 360)
+layout_mode = 1
+offset_left = -3.0
+offset_top = -15.0
+offset_right = 1049.0
+offset_bottom = 400.0
+mouse_filter = 2
+texture = ExtResource("3_tutorial")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="BackButton" type="TextureButton" parent="Content" unique_id=1360684194]
+custom_minimum_size = Vector2(560, 140)
+layout_mode = 1
+offset_left = 246.0
+offset_top = 374.0
+offset_right = 806.0
+offset_bottom = 556.0
+mouse_filter = 2
+texture_normal = SubResource("BackPlaque")
+texture_pressed = SubResource("BackPlaque")
+texture_hover = SubResource("BackPlaque")
+texture_focused = SubResource("BackPlaque")
+ignore_texture_size = true
+stretch_mode = 0
+
+[node name="TextShadow" type="Label" parent="Content/BackButton" unique_id=2102769751]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -4.0
+offset_top = 24.0
+offset_right = -4.0
+offset_bottom = 24.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.247, 0.086, 0.027, 1)
+theme_override_colors/font_outline_color = Color(0.247, 0.086, 0.027, 1)
+theme_override_constants/outline_size = 6
+theme_override_fonts/font = ExtResource("5_font")
+theme_override_font_sizes/font_size = 37
+text = "VOLVER"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="TextGoldDepth" type="Label" parent="Content/BackButton" unique_id=1563425208]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -2.0
+offset_top = 21.0
+offset_right = -2.0
+offset_bottom = 21.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.831, 0.392, 0.063, 1)
+theme_override_colors/font_outline_color = Color(0.443, 0.176, 0.043, 1)
+theme_override_constants/outline_size = 4
+theme_override_fonts/font = ExtResource("5_font")
+theme_override_font_sizes/font_size = 37
+text = "VOLVER"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Text" type="Label" parent="Content/BackButton" unique_id=1457552091]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -17.0
+offset_top = 31.0
+offset_right = 8.0
+offset_bottom = 6.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 0.941, 0.741, 1)
+theme_override_colors/font_shadow_color = Color(0.16, 0.067, 0.027, 0.94)
+theme_override_colors/font_outline_color = Color(0.224, 0.125, 0.047, 1)
+theme_override_constants/shadow_offset_x = 3
+theme_override_constants/shadow_offset_y = 4
+theme_override_constants/outline_size = 3
+theme_override_fonts/font = ExtResource("5_font")
+theme_override_font_sizes/font_size = 37
+text = "VOLVER"
+horizontal_alignment = 1
+vertical_alignment = 1

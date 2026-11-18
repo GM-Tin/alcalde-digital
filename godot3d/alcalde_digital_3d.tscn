@@ -11001,42 +11001,6 @@ mesh = SubResource("ArrayMesh_cbbyy")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0042328043, 0)
 shape = SubResource("ConcavePolygonShape3D_kc3cm")
 
-[node name="chest2" parent="." unique_id=873963030 instance=ExtResource("16_inmg6")]
-transform = Transform3D(0.0050189276, 0.005809369, -2.499988, -7.477978e-06, 2.499993, 0.0058093653, 2.4999948, -4.1882495e-06, 0.0050189313, 33.695168, -402.46863, 0.21724445)
-
-[node name="chest2" type="MeshInstance3D" parent="chest2" unique_id=1193599697]
-mesh = SubResource("ArrayMesh_x46oy")
-
-[node name="AnimationPlayer2" type="AnimationPlayer" parent="chest2" unique_id=242388737]
-libraries/ = SubResource("AnimationLibrary_g26fb")
-
-[node name="AssetMeshCollision" type="StaticBody3D" parent="chest2" unique_id=1361081311]
-
-[node name="@CollisionShape3D@26668" type="CollisionShape3D" parent="chest2/AssetMeshCollision" unique_id=1528309752]
-shape = SubResource("ConcavePolygonShape3D_utcts")
-
-[node name="@CollisionShape3D@26669" type="CollisionShape3D" parent="chest2/AssetMeshCollision" unique_id=357962765]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -0.20000005)
-shape = SubResource("ConcavePolygonShape3D_2pm5r")
-
-[node name="chest3" parent="chest2" unique_id=1027685745 instance=ExtResource("16_inmg6")]
-transform = Transform3D(-0.33651626, 0.0012544875, 0.5209533, 0.0007811639, 0.53985393, -0.0012111702, -0.487149, -9.0431246e-07, -0.35986978, -4.2377205, -1.2363313, 13.100777)
-
-[node name="chest2" type="MeshInstance3D" parent="chest2/chest3" unique_id=1650567943]
-mesh = SubResource("ArrayMesh_x46oy")
-
-[node name="AnimationPlayer2" type="AnimationPlayer" parent="chest2/chest3" unique_id=144388813]
-libraries/ = SubResource("AnimationLibrary_g26fb")
-
-[node name="AssetMeshCollision" type="StaticBody3D" parent="chest2/chest3" unique_id=1256216037]
-
-[node name="_CollisionShape3D_26668" type="CollisionShape3D" parent="chest2/chest3/AssetMeshCollision" unique_id=1806866585]
-shape = SubResource("ConcavePolygonShape3D_utcts")
-
-[node name="_CollisionShape3D_26669" type="CollisionShape3D" parent="chest2/chest3/AssetMeshCollision" unique_id=960893819]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -0.20000005)
-shape = SubResource("ConcavePolygonShape3D_2pm5r")
-
 [node name="pot2" parent="." unique_id=1913498841 instance=ExtResource("17_7tr2o")]
 transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 59, -90.78575, 8)
 
@@ -22023,79 +21987,6 @@ mesh = SubResource("ArrayMesh_dgm8q")
 [node name="wood-structure3" type="MeshInstance3D" parent="." unique_id=70035404]
 transform = Transform3D(3.122884, 0, 0, 0, 3.3733935, 0, 0, 0, 3.1425931, 23.373552, 7.7105627, -5.5027204)
 mesh = SubResource("ArrayMesh_op0ie")
-
-[node name="chest3" parent="." unique_id=934916132 instance=ExtResource("16_inmg6")]
-transform = Transform3D(-0.33651626, 0.0012544875, 0.5209533, 0.0007811639, 0.53985393, -0.0012111702, -0.487149, -9.0431246e-07, -0.35986978, 5.203553, -1.2582815, 6.5788307)
-
-[node name="chest2" type="MeshInstance3D" parent="chest3" unique_id=547313711]
-mesh = SubResource("ArrayMesh_x46oy")
-
-[node name="AnimationPlayer2" type="AnimationPlayer" parent="chest3" unique_id=1447194853]
-libraries/ = SubResource("AnimationLibrary_g26fb")
-
-[node name="AssetMeshCollision" type="StaticBody3D" parent="chest3" unique_id=1294556123]
-
-[node name="_CollisionShape3D_26668" type="CollisionShape3D" parent="chest3/AssetMeshCollision" unique_id=246900872]
-shape = SubResource("ConcavePolygonShape3D_utcts")
-
-[node name="_CollisionShape3D_26669" type="CollisionShape3D" parent="chest3/AssetMeshCollision" unique_id=742416258]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -0.20000005)
-shape = SubResource("ConcavePolygonShape3D_2pm5r")
-
-[node name="chest4" parent="." unique_id=465455661 instance=ExtResource("16_inmg6")]
-transform = Transform3D(1.5314406, 0.003436124, 0.97116435, -0.003561185, 1.4786955, -0.0022550724, -1.4870847, -2.4769909e-06, 1.0001372, 1.8930746, 0.8720182, -10.344915)
-
-[node name="chest2" type="MeshInstance3D" parent="chest4" unique_id=1050879088]
-mesh = SubResource("ArrayMesh_x46oy")
-
-[node name="AnimationPlayer2" type="AnimationPlayer" parent="chest4" unique_id=1275647308]
-libraries/ = SubResource("AnimationLibrary_g26fb")
-
-[node name="AssetMeshCollision" type="StaticBody3D" parent="chest4" unique_id=1184459886]
-
-[node name="_CollisionShape3D_26668" type="CollisionShape3D" parent="chest4/AssetMeshCollision" unique_id=771840667]
-shape = SubResource("ConcavePolygonShape3D_utcts")
-
-[node name="_CollisionShape3D_26669" type="CollisionShape3D" parent="chest4/AssetMeshCollision" unique_id=643521328]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -0.20000005)
-shape = SubResource("ConcavePolygonShape3D_2pm5r")
-
-[node name="chest5" parent="." unique_id=1222325220 instance=ExtResource("16_inmg6")]
-transform = Transform3D(-0.0181911, 0.003436124, -1.3940187, 4.5844703e-05, 1.4786953, 0.0032393348, 2.1345754, -2.4766769e-06, -0.011880264, 23.132225, -353.5819, -5.4634995)
-
-[node name="chest2" type="MeshInstance3D" parent="chest5" unique_id=1804519712]
-mesh = SubResource("ArrayMesh_x46oy")
-
-[node name="AnimationPlayer2" type="AnimationPlayer" parent="chest5" unique_id=822343672]
-libraries/ = SubResource("AnimationLibrary_g26fb")
-
-[node name="AssetMeshCollision" type="StaticBody3D" parent="chest5" unique_id=1595541364]
-
-[node name="_CollisionShape3D_26668" type="CollisionShape3D" parent="chest5/AssetMeshCollision" unique_id=1515220645]
-shape = SubResource("ConcavePolygonShape3D_utcts")
-
-[node name="_CollisionShape3D_26669" type="CollisionShape3D" parent="chest5/AssetMeshCollision" unique_id=949196618]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -0.20000005)
-shape = SubResource("ConcavePolygonShape3D_2pm5r")
-
-[node name="chest5" parent="chest5" unique_id=913905198 instance=ExtResource("16_inmg6")]
-transform = Transform3D(-0.0181911, 0.003436124, -1.3940187, 4.5844703e-05, 1.4786953, 0.0032393348, 2.1345754, -2.4766769e-06, -0.011880264, 23.429304, -225.73772, -5.4637136)
-
-[node name="chest2" type="MeshInstance3D" parent="chest5/chest5" unique_id=1758803598]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0477379e-09, -11.209396, 0)
-mesh = SubResource("ArrayMesh_x46oy")
-
-[node name="AnimationPlayer2" type="AnimationPlayer" parent="chest5/chest5" unique_id=564605640]
-libraries/ = SubResource("AnimationLibrary_g26fb")
-
-[node name="AssetMeshCollision" type="StaticBody3D" parent="chest5/chest5" unique_id=252872279]
-
-[node name="_CollisionShape3D_26668" type="CollisionShape3D" parent="chest5/chest5/AssetMeshCollision" unique_id=501265491]
-shape = SubResource("ConcavePolygonShape3D_utcts")
-
-[node name="_CollisionShape3D_26669" type="CollisionShape3D" parent="chest5/chest5/AssetMeshCollision" unique_id=1252185710]
-transform = Transform3D(1, -6.184564e-11, -9.313226e-10, -1.0186341e-10, 0.9999999, -2.3283064e-10, 1.8626451e-09, 0, 0.99999994, 1.1372404, -228.91148, 0.04354477)
-shape = SubResource("ConcavePolygonShape3D_2pm5r")
 
 [node name="wall-opening3" type="MeshInstance3D" parent="." unique_id=573938631]
 transform = Transform3D(-0.09852574, 0, 4.732595, 0, 3.8189328, 0, -7.1572366, 0, -0.06514839, 11.316722, -0.31202212, -10.469427)

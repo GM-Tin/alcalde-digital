@@ -11,11 +11,19 @@ const ZONE_LENGTH := 72.0
 const ZONE_WIDTH := 30.0
 const WORLD_LENGTH := ZONE_LENGTH * 3.0
 const MAP_SCALE := 1.5
+const MAX_INFO_CHESTS := 10
+const MAX_COOP_PLAYERS := 4
+const COOP_PORT := 7777
 const NPC_MOOD_DURATION := 80.0
 const NPC_MOOD_RECHARGE_DURATION := 2.5
+const BARD_CHEER_RECHARGE_DURATION := NPC_MOOD_RECHARGE_DURATION
+const BARD_CHEER_HOLD_DURATION := 8.0
+const BARD_CHEER_STRENGTH := 1.0 / 3.0
+const NPC_ZERO_MOOD_DEFEAT_COUNT := 3
 const GAME_DURATION_SECONDS := 600.0
 const MENU_BACKGROUND_PATH := "res://assets/ui/medieval_menu_background.png"
 const MENU_BUTTONS_PATH := "res://assets/ui/medieval_buttons_atlas.png"
+const GAME_UI_ATLAS_PATH := "res://assets/ui/game_ui_atlas.png"
 const CARTOON_FONT: FontFile = preload("res://assets/ui/fonts/LilitaOne-Regular.ttf")
 const CHEST_PROGRESS_PATH := "user://chest_progress.cfg"
 const DAY_PHASE_DURATION := 240.0
@@ -46,7 +54,11 @@ var cheered_npcs: Dictionary = {}
 var is_solo_mode := true
 var is_network_host := false
 var network_peer_ids: Array[int] = []
+var network_player_names: Dictionary = {}
+var network_player_name := "Jugador"
 var bard_cooldowns: Dictionary = {}
+var bard_cheer_target := -1
+var bard_cheer_elapsed := 0.0
 var remote_players: Dictionary = {}
 var network_sync_elapsed := 0.0
 var interviewed_npcs: Dictionary = {}
@@ -82,6 +94,7 @@ var game_time_remaining := GAME_DURATION_SECONDS
 var game_running := false
 var lights_enabled := true
 var menu_root: Control
+var home_screen: Control
 var menu_panel: PanelContainer
 var menu_content: VBoxContainer
 var gameplay_top_panel: PanelContainer
@@ -89,16 +102,35 @@ var gameplay_bottom_panel: PanelContainer
 var gameplay_crosshair: Label
 var gameplay_started := false
 var time_progress: ProgressBar
-var time_crown: Label
+var time_label: Label
+var time_fill_style: StyleBoxFlat
+var mission_panel_style: StyleBoxFlat
+var mission_button_style: StyleBoxFlat
+var time_frame: TextureRect
+var time_label_frame: TextureRect
+var restart_button: Button
+var restart_confirmation_root: Control
+var restart_confirmation_panel: PanelContainer
 var timer_container: Control
+var prompt_panel: PanelContainer
 var volume_slider: HSlider
 var scale_picker: OptionButton
 var room_code_input: LineEdit
 var room_name_input: LineEdit
+var room_password_input: LineEdit
+var join_password_input: LineEdit
+var room_password := ""
+var room_password_hash := ""
+var join_password := ""
+var join_room_code := ""
+var pending_peer_passwords: Dictionary = {}
+var network_password_input: LineEdit
+var network_player_name_input: LineEdit
 var random_room_name := ""
 var menu_status: Label
 var random_room_code := ""
 var game_timer_timeout := false
+var last_defeat_cause := "timeout"
 var speed_boost_time := 0.0
 var sun_light: DirectionalLight3D
 var day_environment: Environment
@@ -151,6 +183,7 @@ func _ready() -> void:
 	_on_volume_changed(_load_setting_float("volume", 0.8))
 	get_window().content_scale_factor = _load_setting_float("ui_scale", 1.0)
 	multiplayer.peer_connected.connect(_on_network_peer_connected)
+	multiplayer.peer_disconnected.connect(_on_network_peer_disconnected)
 	multiplayer.connected_to_server.connect(_on_connected_to_server)
 	multiplayer.connection_failed.connect(_on_connection_failed)
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
@@ -451,6 +484,7 @@ func _process(delta: float) -> void:
 	if game_running:
 		_update_npc_moods(delta)
 		_update_npc_facing(delta)
+		_update_bard_cheer(delta)
 		_update_speed_boost(delta)
 		_update_day_night_cycle(delta)
 		_animate_fireflies(delta)
@@ -491,10 +525,22 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F1:
 		_toggle_map_overview()
 		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2:
+		_show_restart_confirmation()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("interact"):
 		if panel != null and panel.visible:
 			_close_question()
 		else:
+			var target := _nearest_interaction_target()
+			if active_role == "Influencer" and not influencer_has_information and String(target.get("kind", "")) == "npc":
+				var npc_index := int(target.npc_index)
+				if float(bard_cooldowns.get(npc_index, 0.0)) <= 0.0:
+					bard_cheer_target = npc_index
+					bard_cheer_elapsed = 0.0
+				get_viewport().set_input_as_handled()
+				return
 			_open_nearest_station()
 	elif question_index >= 0 and event is InputEventKey and event.pressed and not event.echo:
 		var num: int = event.keycode - KEY_1
@@ -679,6 +725,7 @@ func _create_npc_mood_bar(npc: Node3D) -> Node3D:
 func _update_npc_moods(delta: float) -> void:
 	for key in bard_cooldowns.keys():
 		bard_cooldowns[key] = maxf(0.0, float(bard_cooldowns[key]) - delta)
+	var zero_mood_count := 0
 	for i in range(npc_targets.size()):
 		var state: Dictionary = npc_targets[i]
 		var npc := state.node as Node3D
@@ -693,6 +740,8 @@ func _update_npc_moods(delta: float) -> void:
 		else:
 			state.seconds_left = maxf(float(state.seconds_left) - delta, 0.0)
 			state.mood = float(state.seconds_left) / npc_mood_duration
+		if float(state.mood) <= 0.0:
+			zero_mood_count += 1
 		var bar := state.bar as Node3D
 		if is_instance_valid(bar):
 			bar.global_position = npc.global_position + Vector3(0, 2.25, 0)
@@ -710,6 +759,31 @@ func _update_npc_moods(delta: float) -> void:
 			if label:
 				label.text = "ÁNIMO · %d%%" % roundi(float(state.mood) * 100.0)
 		npc_targets[i] = state
+	if game_running and zero_mood_count >= NPC_ZERO_MOOD_DEFEAT_COUNT:
+		_end_game(false, "low_morale")
+
+func _update_bard_cheer(delta: float) -> void:
+	if bard_cheer_target < 0:
+		return
+	if active_role != "Influencer" or influencer_has_information or not Input.is_action_pressed("interact"):
+		bard_cheer_target = -1
+		bard_cheer_elapsed = 0.0
+		return
+	var target := _nearest_interaction_target()
+	if String(target.get("kind", "")) != "npc" or int(target.get("npc_index", -1)) != bard_cheer_target:
+		bard_cheer_target = -1
+		bard_cheer_elapsed = 0.0
+		return
+	if float(bard_cooldowns.get(bard_cheer_target, 0.0)) > 0.0:
+		bard_cheer_target = -1
+		bard_cheer_elapsed = 0.0
+		return
+	bard_cheer_elapsed = minf(bard_cheer_elapsed + delta, BARD_CHEER_HOLD_DURATION)
+	if bard_cheer_elapsed >= BARD_CHEER_HOLD_DURATION:
+		var completed_target := bard_cheer_target
+		bard_cheer_target = -1
+		bard_cheer_elapsed = 0.0
+		_cheer_npc(completed_target, BARD_CHEER_STRENGTH)
 
 func _update_npc_facing(delta: float) -> void:
 	if player == null:
@@ -735,7 +809,7 @@ func _cheer_npc(npc_index: int, strength: float = 1.0) -> void:
 		state.mood = minf(1.0, float(state.mood) + strength)
 		state.seconds_left = float(state.mood) * npc_mood_duration
 		state.recharging = false
-		bard_cooldowns[npc_index] = NPC_MOOD_RECHARGE_DURATION
+		bard_cooldowns[npc_index] = BARD_CHEER_RECHARGE_DURATION
 	else:
 		if state.recharging:
 			return
@@ -764,9 +838,6 @@ func _cheer_npc(npc_index: int, strength: float = 1.0) -> void:
 func _discover_information_chests() -> void:
 	info_chests.clear()
 	chest_lights.clear()
-	var progress := ConfigFile.new()
-	progress.load(CHEST_PROGRESS_PATH)
-	var opened_chests: Array = progress.get_value("progress", "opened_chests", [])
 	var candidates := find_children("*", "Node3D", true, false)
 	for candidate in candidates:
 		var chest := candidate as Node3D
@@ -782,11 +853,13 @@ func _discover_information_chests() -> void:
 		if chest.get_meta("trap_chest", false):
 			_setup_chest_glow(chest)
 		elif (path_is_chest or (named_chest and not has_chest_ancestor)) and not has_chest_ancestor:
-			if opened_chests.has(_chest_id(chest)):
-				info_chests.append({"node":chest, "position":chest.global_position, "name":String(chest.name)})
-				_setup_chest_glow(chest)
-			else:
+			if info_chests.size() >= MAX_INFO_CHESTS:
 				chest.queue_free()
+				continue
+			# Every chest stays in the world each match. Its invisible light anchor is
+			# attached regardless of whether this chest has already been opened.
+			info_chests.append({"node":chest, "position":chest.global_position, "name":String(chest.name)})
+			_setup_chest_glow(chest)
 	info_chests.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.position.x < b.position.x)
 
 func _chest_id(chest: Node3D) -> String:
@@ -1129,7 +1202,9 @@ func _apply_day_phase(from_phase: Dictionary, to_phase: Dictionary, progress: fl
 		night_amount = float(day_sky.get_shader_parameter("night_amount"))
 	var lights_active := lights_enabled and night_amount > 0.005
 	var light_flutter := 0.88 + 0.12 * (0.5 + 0.5 * sin(firefly_time * 2.0))
-	var shared_light_energy := night_amount * 0.26 * light_flutter
+	# All invisible NPC/chest orbs start on the exact same dusk threshold as the
+	# visible fireflies and smoothly grow with their shared night ramp.
+	var shared_light_energy := night_amount * 0.26 * light_flutter if lights_active else 0.0
 	for glow in npc_night_lights:
 		if is_instance_valid(glow):
 			glow.visible = lights_active
@@ -1302,6 +1377,7 @@ func _find_safe_spawn() -> Vector3:
 	capsule.height = 1.2
 	var space := get_world_3d().direct_space_state
 	var clear_candidates: Array[Vector3] = []
+	var spawn_target := Vector3(4.5, 0.0, 0.0)
 	# Check the whole entrance aisle at half-metre spacing. The old coarse scan
 	# could miss a narrow clear spot and then fall back inside a blocking collider.
 	for x_step in range(4, 141, 2):
@@ -1320,15 +1396,16 @@ func _find_safe_spawn() -> Vector3:
 				continue
 			var candidate := Vector3(x, ground_y + 0.08, z)
 			clear_candidates.append(candidate)
-			if _spawn_route_is_clear(space, capsule, x, z, ground_y):
-				return candidate
-	# Never use a hard-coded point that might be occupied in a user-edited map.
-	# If all forward lanes are narrow, spawn at the nearest verified clear cell.
 	if not clear_candidates.is_empty():
 		clear_candidates.sort_custom(func(a: Vector3, b: Vector3) -> bool:
-			return a.distance_squared_to(Vector3(2.0, 0.0, 0.0)) < b.distance_squared_to(Vector3(2.0, 0.0, 0.0))
+			return a.distance_squared_to(spawn_target) < b.distance_squared_to(spawn_target)
 		)
+		for candidate in clear_candidates:
+			if _spawn_route_is_clear(space, capsule, candidate.x, candidate.z, candidate.y - 0.08):
+				return candidate
+		# If all forward lanes are narrow, spawn at the nearest verified clear cell.
 		return clear_candidates[0]
+	# Never use a hard-coded point that might be occupied in a user-edited map.
 	push_warning("No encontré una celda libre para el spawn; revisa las colisiones del área inicial.")
 	return Vector3(2, 0.08, 0)
 
@@ -1469,7 +1546,10 @@ func _set_gameplay_ui_visible(visible_now: bool) -> void:
 	if is_instance_valid(gameplay_bottom_panel): gameplay_bottom_panel.visible = false
 	if is_instance_valid(gameplay_crosshair): gameplay_crosshair.visible = visible_now
 	if is_instance_valid(timer_container): timer_container.visible = visible_now
-	if is_instance_valid(prompt): prompt.visible = visible_now
+	if is_instance_valid(restart_button): restart_button.visible = visible_now
+	if is_instance_valid(restart_confirmation_root): restart_confirmation_root.visible = false
+	if is_instance_valid(prompt_panel): prompt_panel.visible = visible_now
+	elif is_instance_valid(prompt): prompt.visible = visible_now
 	if is_instance_valid(panel): panel.visible = false
 	if is_instance_valid(network_panel): network_panel.visible = false
 
@@ -1477,6 +1557,12 @@ func _show_menu_page(page: String) -> void:
 	if not is_instance_valid(menu_root):
 		return
 	menu_root.visible = true
+	if page == "home":
+		home_screen.visible = true
+		menu_panel.visible = false
+		return
+	home_screen.visible = false
+	menu_panel.visible = true
 	if page == "tutorial":
 		menu_panel.offset_left = -600
 		menu_panel.offset_top = -350
@@ -1528,20 +1614,14 @@ func _show_menu_page(page: String) -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_style_cartoon_text(title, 42)
 	title.add_theme_color_override("font_color", Color("fff0bd"))
-	if page == "home":
-		_add_welcome_header(title)
-	elif page != "tutorial":
+	if page != "tutorial" and page != "settings":
 		menu_content.add_child(title)
 	match page:
-		"home":
-			_add_image_menu_button("JUGAR", 0, func(): _show_menu_page("mode"))
-			_add_image_menu_button("TUTORIAL", 1, func(): _show_menu_page("tutorial"))
-			_add_image_menu_button("AJUSTES", 2, func(): _show_menu_page("settings"))
 		"mode":
 			title.text = "ELIGE EL MODO"
 			_add_menu_button("MODO SOLITARIO", _start_solo_game)
 			_add_menu_button("MODO COOPERATIVO", func(): _show_menu_page("coop"))
-			_add_menu_button("VOLVER", func(): _show_menu_page("home"), Vector2(500, 150))
+			_add_menu_button("VOLVER", func(): _show_menu_page("home"))
 		"coop":
 			title.text = "COOPERATIVO · 2–4 HÉROES"
 			_add_menu_label("Crea una sala o únete con el código que te compartieron.", 16)
@@ -1557,71 +1637,99 @@ func _show_menu_page(page: String) -> void:
 			_style_cartoon_text(room_name_input, 23)
 			_style_line_edit_cartoon(room_name_input)
 			menu_content.add_child(room_name_input)
+			_add_menu_label("Tu nombre de jugador", 16)
+			network_player_name_input = LineEdit.new()
+			network_player_name_input.placeholder_text = "Ej.: Guardián del reino"
+			network_player_name_input.text = network_player_name
+			network_player_name_input.custom_minimum_size = Vector2(620, 54)
+			_style_cartoon_text(network_player_name_input, 23)
+			_style_line_edit_cartoon(network_player_name_input)
+			menu_content.add_child(network_player_name_input)
+			_add_menu_label("Contraseña de acceso", 16)
+			room_password_input = LineEdit.new()
+			room_password_input.placeholder_text = "Crea una contraseña para tu sala"
+			room_password_input.secret = true
+			room_password_input.custom_minimum_size = Vector2(620, 54)
+			_style_cartoon_text(room_password_input, 23)
+			_style_line_edit_cartoon(room_password_input)
+			menu_content.add_child(room_password_input)
 			_add_menu_button("GENERAR CÓDIGO Y ESPERAR", _create_room_from_menu)
 			_add_menu_button("VOLVER", func(): _show_menu_page("coop"))
 		"quick_join":
 			title.text = "PARTIDA RÁPIDA"
-			_add_menu_label("Pega el código de sala que te compartieron.", 16)
+			_add_menu_label("Pega el código de invitación o la IP del anfitrión.", 16)
 			room_code_input = LineEdit.new()
-			room_code_input.placeholder_text = "Código de sala"
+			room_code_input.placeholder_text = "Código de sala o IP"
+			room_code_input.text = join_room_code
 			room_code_input.custom_minimum_size = Vector2(620, 54)
 			_style_cartoon_text(room_code_input, 23)
 			_style_line_edit_cartoon(room_code_input)
 			menu_content.add_child(room_code_input)
+			_add_menu_label("Tu nombre de jugador", 16)
+			network_player_name_input = LineEdit.new()
+			network_player_name_input.placeholder_text = "Ej.: Mensajero"
+			network_player_name_input.text = network_player_name
+			network_player_name_input.custom_minimum_size = Vector2(620, 54)
+			_style_cartoon_text(network_player_name_input, 23)
+			_style_line_edit_cartoon(network_player_name_input)
+			menu_content.add_child(network_player_name_input)
+			_add_menu_label("Contraseña de la sala", 16)
+			join_password_input = LineEdit.new()
+			join_password_input.placeholder_text = "Escribe la contraseña que te dieron"
+			join_password_input.secret = true
+			join_password_input.custom_minimum_size = Vector2(620, 54)
+			_style_cartoon_text(join_password_input, 23)
+			_style_line_edit_cartoon(join_password_input)
+			menu_content.add_child(join_password_input)
 			_add_menu_button("CONECTAR", _join_room_code)
 			_add_menu_button("VOLVER", func(): _show_menu_page("coop"))
 		"lobby":
 			title.text = "SALA LISTA"
-			_add_menu_label("Sala: %s\nCódigo: %s\nJugadores: %d/4\nComparte el código e inicia cuando estén listos. El código conecta por red local; para Internet se necesita abrir UDP 7777 o usar un servidor de retransmisión." % [random_room_name, random_room_code, maxi(network_peer_ids.size(), 1)], 15)
-			_add_menu_button("INICIAR PARTIDA", _start_network_match)
-			_add_menu_button("CANCELAR SALA", _cancel_room)
+			var member_names: Array[String] = []
+			for peer_id in network_peer_ids:
+				var member_name := String(network_player_names.get(peer_id, "Jugador %d" % peer_id))
+				member_names.append(member_name + (" (anfitrión)" if peer_id == 1 else ""))
+			var credentials_text := "Sala: %s\nCódigo: %s\nJugadores: %d/%d\n%s\nComparte el código y la contraseña con tu grupo. Para Internet se necesita abrir UDP 7777 o usar un servidor de retransmisión." % [random_room_name, random_room_code, maxi(network_peer_ids.size(), 1), MAX_COOP_PLAYERS, "\n".join(PackedStringArray(member_names))]
+			if is_network_host:
+				credentials_text += "\nContraseña: %s" % room_password
+			_add_menu_label(credentials_text, 15)
+			if is_network_host:
+				_add_menu_button("INICIAR PARTIDA", _start_network_match)
+				_add_menu_button("CANCELAR SALA", _cancel_room)
+			else:
+				_add_menu_label("Esperando a que el anfitrión inicie la partida…", 16)
+				_add_menu_button("SALIR DE LA SALA", _cancel_room)
 		"waiting":
 			title.text = "CONECTADO A LA SALA"
 			_add_menu_label("Esperando a que el anfitrión inicie la partida…", 17)
 			_add_menu_button("CANCELAR", _cancel_room)
 		"tutorial":
-			var tutorial_art := TextureRect.new()
-			tutorial_art.texture = load("res://assets/ui/tutorial_controls.png") as Texture2D
-			tutorial_art.custom_minimum_size = Vector2(1120, 390)
-			tutorial_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-			tutorial_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			tutorial_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			menu_content.add_child(tutorial_art)
-			_add_menu_button("VOLVER", func(): _show_menu_page("home"), Vector2(500, 150))
+			var tutorial_scene := load("res://scenes/tutorial_ui.tscn") as PackedScene
+			if tutorial_scene != null:
+				var tutorial_ui := tutorial_scene.instantiate()
+				tutorial_ui.name = "TutorialContent"
+				tutorial_ui.back_requested.connect(func(): _show_menu_page("home"))
+				menu_content.add_child(tutorial_ui)
 		"settings":
 			title.text = "AJUSTES"
-			_add_menu_label("Volumen general", 16)
-			volume_slider = HSlider.new()
-			volume_slider.min_value = 0.0
-			volume_slider.max_value = 1.0
-			volume_slider.step = 0.05
-			volume_slider.value = _load_setting_float("volume", 0.8)
-			volume_slider.custom_minimum_size = Vector2(620, 46)
-			_style_slider_cartoon(volume_slider)
-			volume_slider.value_changed.connect(_on_volume_changed)
-			menu_content.add_child(volume_slider)
-			var lights_toggle := CheckButton.new()
-			lights_toggle.text = "Luces nocturnas y luciérnagas"
-			lights_toggle.custom_minimum_size = Vector2(620, 48)
-			_style_cartoon_text(lights_toggle, 24)
-			_style_check_button_cartoon(lights_toggle)
-			lights_toggle.button_pressed = _load_setting_bool("lights_enabled", true)
-			lights_toggle.toggled.connect(_on_lights_toggled)
-			menu_content.add_child(lights_toggle)
-			_add_menu_label("Escala de interfaz", 16)
-			scale_picker = OptionButton.new()
-			scale_picker.add_item("Pequeña · 85%", 0)
-			scale_picker.add_item("Normal · 100%", 1)
-			scale_picker.add_item("Grande · 115%", 2)
-			scale_picker.selected = clampi(roundi((_load_setting_float("ui_scale", 1.0) - 0.85) / 0.15), 0, 2)
-			scale_picker.item_selected.connect(_on_scale_selected)
-			scale_picker.custom_minimum_size = Vector2(620, 58)
-			_style_option_button_cartoon(scale_picker)
-			menu_content.add_child(scale_picker)
-			_add_menu_button("VOLVER", func(): _show_menu_page("home"))
+			var settings_scene := load("res://scenes/settings_ui.tscn") as PackedScene
+			if settings_scene != null:
+				var settings_ui := settings_scene.instantiate()
+				settings_ui.name = "SettingsContent"
+				settings_ui.back_requested.connect(func(): _show_menu_page("home"))
+				settings_ui.volume_changed.connect(_on_volume_changed)
+				settings_ui.lights_toggled.connect(_on_lights_toggled)
+				settings_ui.scale_selected.connect(_on_scale_selected)
+				var selected_scale := clampi(roundi((_load_setting_float("ui_scale", 1.0) - 0.85) / 0.15), 0, 2)
+				settings_ui.set_values(_load_setting_float("volume", 0.8), _load_setting_bool("lights_enabled", true), selected_scale)
+				menu_content.add_child(settings_ui)
 		"defeat":
-			title.text = "EL REY YA HIZO SU ANUNCIO"
-			_add_menu_label("Se agotó el tiempo antes de completar las misiones. Vuelve a intentarlo.", 16)
+			if last_defeat_cause == "low_morale":
+				title.text = "EL REINO PERDIÓ LA CONFIANZA"
+				_add_menu_label("Tres o más vecinos llegaron a 0% de ánimo. Anima a la gente antes de que pierda la esperanza.", 16)
+			else:
+				title.text = "EL REY YA HIZO SU ANUNCIO"
+				_add_menu_label("Se agotó el tiempo antes de completar las misiones. Vuelve a intentarlo.", 16)
 			_add_menu_button("VOLVER AL INICIO", _return_to_menu)
 		"victory":
 			title.text = "¡EL REINO ESTÁ A SALVO!"
@@ -1761,7 +1869,7 @@ func _style_line_edit_cartoon(edit: LineEdit) -> void:
 	edit.add_theme_color_override("font_color", Color("fff0bd"))
 	edit.add_theme_color_override("font_placeholder_color", Color("e5cba4"))
 
-func _add_menu_button(caption: String, callback: Callable, button_size: Vector2 = Vector2(430, 135)) -> void:
+func _add_menu_button(caption: String, callback: Callable, button_size: Vector2 = Vector2(560, 140)) -> void:
 	var button := Button.new()
 	button.text = ""
 	button.custom_minimum_size = button_size
@@ -1797,7 +1905,7 @@ func _add_image_menu_button(caption: String, atlas_index: int, callback: Callabl
 	var button := Button.new()
 	button.name = "ImageButton_%s" % caption.to_pascal_case()
 	button.focus_mode = Control.FOCUS_ALL
-	button.custom_minimum_size = Vector2(535, 166)
+	button.custom_minimum_size = Vector2(560, 140)
 	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	button.mouse_filter = Control.MOUSE_FILTER_STOP
 	button.text = ""
@@ -1951,8 +2059,13 @@ func _on_scale_selected(index: int) -> void:
 
 func _create_room_from_menu() -> void:
 	random_room_name = room_name_input.text.strip_edges() if room_name_input != null else ""
-	if random_room_name.is_empty():
-		random_room_name = "Reino cooperativo"
+	room_password = room_password_input.text.strip_edges() if room_password_input != null else ""
+	network_player_name = network_player_name_input.text.strip_edges() if network_player_name_input != null else "Jugador"
+	if random_room_name.is_empty() or room_password.is_empty() or network_player_name.is_empty():
+		_show_menu_page("create_room")
+		_add_menu_label("Escribe el nombre de la sala, tu nombre y una contraseña.", 15)
+		return
+	room_password_hash = room_password.sha256_text()
 	_host_network_game()
 	if multiplayer.multiplayer_peer == null:
 		_show_menu_page("create_room")
@@ -1984,6 +2097,15 @@ func _decode_room_code(value: String) -> String:
 
 func _join_room_code() -> void:
 	if room_code_input == null or room_code_input.text.strip_edges().is_empty():
+		_show_menu_page("quick_join")
+		_add_menu_label("Escribe el código de sala y su contraseña.", 15)
+		return
+	join_room_code = room_code_input.text.strip_edges()
+	join_password = join_password_input.text.strip_edges() if join_password_input != null else ""
+	network_player_name = network_player_name_input.text.strip_edges() if network_player_name_input != null else "Jugador"
+	if join_password.is_empty() or network_player_name.is_empty():
+		_show_menu_page("quick_join")
+		_add_menu_label("Escribe tu nombre y la contraseña para entrar.", 15)
 		return
 	var host := _decode_room_code(room_code_input.text)
 	if host.is_empty():
@@ -2003,6 +2125,12 @@ func _cancel_room() -> void:
 	is_solo_mode = true
 	is_network_host = false
 	network_peer_ids.clear()
+	pending_peer_passwords.clear()
+	room_password = ""
+	room_password_hash = ""
+	join_password = ""
+	join_room_code = ""
+	network_player_names.clear()
 	game_running = false
 	gameplay_started = false
 	player.controls_enabled = false
@@ -2045,13 +2173,28 @@ func _reset_match_state() -> void:
 	informed_npcs.clear()
 	cheered_npcs.clear()
 	bard_cooldowns.clear()
+	bard_cheer_target = -1
+	bard_cheer_elapsed = 0.0
 	journalist_verified = false
 	journalist_results.clear()
+	journalist_puzzle_npc = -1
+	journalist_puzzle_sequence.clear()
+	journalist_puzzle_input.clear()
+	journalist_claim_index = -1
 	influencer_has_information = false
 	answered = 0
 	roulette_used = false
 	game_time_remaining = GAME_DURATION_SECONDS
 	game_timer_timeout = false
+	npc_mood_duration = NPC_MOOD_DURATION
+	speed_boost_time = 0.0
+	if is_instance_valid(player):
+		player.set("speed", 6.0)
+	for chest_info in info_chests:
+		_close_chest_visual(chest_info.node as Node3D)
+	var chest_progress := ConfigFile.new()
+	chest_progress.set_value("progress", "opened_chests", [])
+	chest_progress.save(CHEST_PROGRESS_PATH)
 	for state in npc_targets:
 		state.mood = 1.0
 		state.seconds_left = npc_mood_duration
@@ -2084,8 +2227,81 @@ func _return_to_menu() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_show_menu_page("home")
 
-func _end_game(won: bool) -> void:
+func _show_restart_confirmation() -> void:
+	if not game_running or not is_instance_valid(restart_confirmation_root):
+		return
 	game_running = false
+	if is_instance_valid(player):
+		player.controls_enabled = false
+		player.set_physics_process(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	restart_confirmation_root.visible = true
+
+func _cancel_restart_confirmation() -> void:
+	if is_instance_valid(restart_confirmation_root):
+		restart_confirmation_root.visible = false
+	if not gameplay_started:
+		return
+	game_running = true
+	if is_instance_valid(player):
+		player.controls_enabled = true
+		player.set_physics_process(true)
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+func _confirm_restart_match() -> void:
+	if is_instance_valid(restart_confirmation_root):
+		restart_confirmation_root.visible = false
+	if multiplayer.multiplayer_peer != null:
+		if is_network_host:
+			rpc("_receive_restart_match")
+			_perform_restart_match()
+		else:
+			rpc_id(1, "_request_restart_match")
+		return
+	_perform_restart_match()
+
+func _perform_restart_match() -> void:
+	_reset_match_state()
+	gameplay_started = true
+	game_running = true
+	game_timer_timeout = false
+	day_cycle_elapsed = 0.0
+	if day_phase_presets.size() >= 3:
+		_apply_day_phase(day_phase_presets[0], day_phase_presets[0], 0.0)
+	if is_instance_valid(player):
+		player.velocity = Vector3.ZERO
+		player.global_position = _find_safe_spawn()
+		player.controls_enabled = true
+		player.set_physics_process(true)
+	if is_instance_valid(camera):
+		camera.make_current()
+	if is_instance_valid(panel):
+		panel.visible = false
+	if is_instance_valid(prompt_panel):
+		prompt_panel.visible = false
+	_update_timer_hud()
+	_update_role_ui()
+	_update_information_hud()
+	_set_gameplay_ui_visible(true)
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_broadcast_coop_state()
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_restart_match() -> void:
+	if not multiplayer.is_server() or not is_network_host:
+		return
+	rpc("_receive_restart_match")
+	_perform_restart_match()
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_restart_match() -> void:
+	_perform_restart_match()
+
+func _end_game(won: bool, defeat_cause: String = "timeout") -> void:
+	game_running = false
+	if not won:
+		last_defeat_cause = defeat_cause
+		_reset_match_state()
 	player.controls_enabled = false
 	player.set_physics_process(false)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -2106,8 +2322,14 @@ func _update_timer_hud() -> void:
 		return
 	time_progress.value = game_time_remaining
 	var progress_ratio := game_time_remaining / GAME_DURATION_SECONDS
-	time_crown.position.x = -238.0 + 476.0 * progress_ratio
-	time_crown.add_theme_color_override("font_color", Color("ffe39a").lerp(Color("ff7777"), 1.0 - progress_ratio))
+	var total_seconds := ceili(game_time_remaining)
+	time_label.text = "%02d:%02d" % [total_seconds / 60, total_seconds % 60]
+	var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 160.0)
+	var urgent := 1.0 - clampf(progress_ratio / 0.25, 0.0, 1.0)
+	time_fill_style.bg_color = Color("66d5a7").lerp(Color("f0b643"), 1.0 - progress_ratio)
+	time_fill_style.bg_color = time_fill_style.bg_color.lerp(Color("ed6262"), urgent * (0.62 + pulse * 0.18))
+	time_label.add_theme_color_override("font_color", Color("fff0bd").lerp(Color("ffd0a0"), urgent * (0.4 + pulse * 0.12)))
+	time_label.scale = Vector2.ONE * (1.0 + urgent * pulse * 0.055)
 
 func _build_ui() -> void:
 	var layer := CanvasLayer.new()
@@ -2117,32 +2339,51 @@ func _build_ui() -> void:
 	top.name = "GameplayStatus"
 	gameplay_top_panel = top
 	top.position = Vector2(22, 18)
-	top.custom_minimum_size = Vector2(420, 104)
-	_style_panel(top, Color("171d2b"), Color("526c83"))
+	top.custom_minimum_size = Vector2(420, 240)
+	_style_atlas_panel(top, Vector2(420, 240))
+	var mission_card := Control.new()
+	mission_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var mission_frame := TextureRect.new()
+	mission_frame.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mission_frame.texture = _game_ui_atlas_region(Rect2(872, 625, 656, 383))
+	mission_frame.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	mission_frame.stretch_mode = TextureRect.STRETCH_SCALE
+	mission_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mission_card.add_child(mission_frame)
 	var top_content := VBoxContainer.new()
+	top_content.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	top_content.offset_left = 42
+	top_content.offset_right = -42
+	top_content.offset_top = 48
+	top_content.offset_bottom = -24
 	var top_label := Label.new()
 	top_label.text = "ALCALDE DIGITAL     ◆     CIUDAD EN RED\nVerifica antes de compartir  ·  Explora tres distritos"
 	_style_cartoon_text(top_label, 20)
 	top_label.visible = false
 	top_content.add_child(top_label)
 	solo_role_button = Button.new()
-	solo_role_button.custom_minimum_size = Vector2(360, 34)
+	solo_role_button.custom_minimum_size = Vector2(320, 38)
 	_style_cartoon_text(solo_role_button, 19)
+	_style_wood_button(solo_role_button)
 	solo_role_button.pressed.connect(_cycle_solo_role)
 	top_content.add_child(solo_role_button)
 	network_button = Button.new()
 	network_button.text = "Multijugador por red"
 	_style_cartoon_text(network_button, 19)
 	network_button.visible = false
-	network_button.custom_minimum_size = Vector2(360, 32)
+	network_button.custom_minimum_size = Vector2(450, 34)
 	network_button.pressed.connect(_open_network_panel)
 	top_content.add_child(network_button)
-	top.custom_minimum_size = Vector2(420, 76)
+	top.custom_minimum_size = Vector2(420, 240)
 	hud = Label.new()
-	_style_cartoon_text(hud, 18)
+	_style_cartoon_text(hud, 17)
+	hud.add_theme_color_override("font_color", Color("fff0bd"))
+	hud.custom_minimum_size = Vector2(328, 112)
+	hud.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hud.text = "◆ Ciudadanía: 0 / 3     ◆ Confianza: 100%"
 	top_content.add_child(hud)
-	top.add_child(top_content)
+	mission_card.add_child(top_content)
+	top.add_child(mission_card)
 	layer.add_child(top)
 	var bottom := PanelContainer.new()
 	gameplay_bottom_panel = bottom
@@ -2174,18 +2415,28 @@ func _build_ui() -> void:
 	crosshair.add_theme_constant_override("shadow_offset_y", 1)
 	layer.add_child(crosshair)
 	prompt = Label.new()
-	prompt.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	prompt.position = Vector2(-150, -104)
-	prompt.custom_minimum_size = Vector2(300, 36)
+	prompt_panel = PanelContainer.new()
+	prompt_panel.name = "InteractionPlaque"
+	prompt_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	prompt_panel.offset_left = -370
+	prompt_panel.offset_top = -104
+	prompt_panel.offset_right = 370
+	prompt_panel.offset_bottom = -48
+	_style_wood_panel(prompt_panel, Color("432a1d"), Vector2(740, 56))
+	prompt.custom_minimum_size = Vector2(700, 34)
+	prompt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	prompt.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_style_cartoon_text(prompt, 22)
-	layer.add_child(prompt)
+	prompt.add_theme_color_override("font_color", Color("fff0d0"))
+	prompt_panel.add_child(prompt)
+	layer.add_child(prompt_panel)
 	panel = PanelContainer.new()
 	panel.set_anchors_preset(Control.PRESET_CENTER)
 	panel.position = Vector2(-300, -205)
 	panel.custom_minimum_size = Vector2(600, 410)
 	panel.visible = false
-	_style_panel(panel, Color("171d2b"), Color("73c9c9"))
+	_style_wood_panel(panel, Color("432a1d"), Vector2(600, 410))
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 26)
 	margin.add_theme_constant_override("margin_right", 26)
@@ -2194,6 +2445,7 @@ func _build_ui() -> void:
 	panel_text = Label.new()
 	panel_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_style_cartoon_text(panel_text, 23)
+	panel_text.add_theme_color_override("font_color", Color("fff0d0"))
 	margin.add_child(panel_text)
 	panel.add_child(margin)
 	layer.add_child(panel)
@@ -2223,6 +2475,12 @@ func _build_ui() -> void:
 	_style_cartoon_text(address_input, 19)
 	_style_line_edit_cartoon(address_input)
 	network_box.add_child(address_input)
+	network_password_input = LineEdit.new()
+	network_password_input.placeholder_text = "Contraseña de la sala"
+	network_password_input.secret = true
+	_style_cartoon_text(network_password_input, 19)
+	_style_line_edit_cartoon(network_password_input)
+	network_box.add_child(network_password_input)
 	var join_button := Button.new()
 	join_button.text = "Conectarme"
 	_style_cartoon_text(join_button, 20)
@@ -2243,54 +2501,77 @@ func _build_ui() -> void:
 	var timer_container := Control.new()
 	self.timer_container = timer_container
 	timer_container.name = "KingdomTimer"
+	timer_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	timer_container.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	timer_container.offset_left = -250
-	timer_container.offset_top = 22
-	timer_container.offset_right = 250
-	timer_container.offset_bottom = 58
+	timer_container.offset_left = -270
+	timer_container.offset_top = 150
+	timer_container.offset_right = 270
+	timer_container.offset_bottom = 296
+	time_frame = TextureRect.new()
+	time_frame.position = Vector2.ZERO
+	time_frame.size = Vector2(180, 68)
+	time_frame.texture = _game_ui_atlas_region(Rect2(22, 674, 642, 98))
+	time_frame.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	time_frame.stretch_mode = TextureRect.STRETCH_SCALE
+	time_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	time_frame.visible = false
+	timer_container.add_child(time_frame)
+	time_label_frame = TextureRect.new()
+	time_label_frame.position = Vector2.ZERO
+	time_label_frame.size = Vector2(180, 68)
+	time_label_frame.texture = _game_ui_atlas_region(Rect2(879, 57, 382, 157))
+	time_label_frame.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	time_label_frame.stretch_mode = TextureRect.STRETCH_SCALE
+	time_label_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	timer_container.add_child(time_label_frame)
 	var timer_background := StyleBoxFlat.new()
-	timer_background.bg_color = Color("19243a")
-	timer_background.set_corner_radius_all(10)
-	timer_background.border_color = Color("e7bd68")
-	timer_background.set_border_width_all(2)
+	timer_background.bg_color = Color("28160f")
+	timer_background.set_corner_radius_all(12)
+	timer_background.content_margin_left = 0
+	timer_background.content_margin_right = 0
+	timer_background.content_margin_top = 0
+	timer_background.content_margin_bottom = 0
 	time_progress = ProgressBar.new()
-	time_progress.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	time_progress.position = Vector2(49, 78)
+	time_progress.size = Vector2(442, 34)
+	time_progress.visible = false
 	time_progress.min_value = 0.0
 	time_progress.max_value = GAME_DURATION_SECONDS
 	time_progress.value = GAME_DURATION_SECONDS
 	time_progress.show_percentage = false
 	time_progress.add_theme_stylebox_override("background", timer_background)
 	var timer_fill := StyleBoxFlat.new()
-	timer_fill.bg_color = Color("76d6bd")
+	time_fill_style = timer_fill
+	timer_fill.bg_color = Color("66d5a7")
 	timer_fill.set_corner_radius_all(8)
 	time_progress.add_theme_stylebox_override("fill", timer_fill)
 	timer_container.add_child(time_progress)
-	time_crown = Label.new()
-	time_crown.text = "♛"
-	time_crown.position = Vector2(228, -9)
-	time_crown.custom_minimum_size = Vector2(28, 34)
-	_style_cartoon_text(time_crown, 29)
-	time_crown.add_theme_font_override("font", CARTOON_FONT)
-	time_crown.add_theme_color_override("font_color", Color("ffe39a"))
-	timer_container.add_child(time_crown)
+	time_label = Label.new()
+	time_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	time_label.offset_left = -76
+	time_label.offset_top = 15
+	time_label.offset_right = 76
+	time_label.offset_bottom = 49
+	time_label.text = "10:00"
+	time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	time_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	time_label.pivot_offset = Vector2(76, 17)
+	_style_cartoon_text(time_label, 25)
+	time_label.add_theme_color_override("font_color", Color("fff0bd"))
+	timer_container.add_child(time_label)
 	layer.add_child(timer_container)
-	var background_root := Control.new()
+	get_viewport().size_changed.connect(_layout_game_hud)
+	_layout_game_hud()
+	var menu_scene := load("res://scenes/main_menu_ui.tscn") as PackedScene
+	var background_root := menu_scene.instantiate() as Control
 	background_root.name = "MainMenu"
 	background_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	layer.add_child(background_root)
 	menu_root = background_root
-	var menu_background := TextureRect.new()
-	menu_background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	menu_background.texture = load(MENU_BACKGROUND_PATH) as Texture2D
-	menu_background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	menu_background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	menu_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	background_root.add_child(menu_background)
-	var menu_shade := ColorRect.new()
-	menu_shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	menu_shade.color = Color(0.04, 0.07, 0.13, 0.34)
-	menu_shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	background_root.add_child(menu_shade)
+	home_screen = background_root.get_node("HomeScreen") as Control
+	background_root.connect("play_requested", func(): _show_menu_page("mode"))
+	background_root.connect("tutorial_requested", func(): _show_menu_page("tutorial"))
+	background_root.connect("settings_requested", func(): _show_menu_page("settings"))
 	menu_panel = PanelContainer.new()
 	menu_panel.set_anchors_preset(Control.PRESET_CENTER)
 	menu_panel.offset_left = -250
@@ -2313,14 +2594,98 @@ func _build_ui() -> void:
 	menu_margin.add_child(menu_content)
 	menu_panel.add_child(menu_margin)
 	background_root.add_child(menu_panel)
+	restart_button = Button.new()
+	restart_button.name = "RestartMatchButton"
+	restart_button.text = "REINICIAR"
+	restart_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	restart_button.offset_left = -196
+	restart_button.offset_top = -62
+	restart_button.offset_right = -20
+	restart_button.offset_bottom = -16
+	restart_button.custom_minimum_size = Vector2(176, 46)
+	restart_button.focus_mode = Control.FOCUS_ALL
+	_style_cartoon_text(restart_button, 18)
+	_style_wood_button(restart_button)
+	restart_button.pressed.connect(_show_restart_confirmation)
+	layer.add_child(restart_button)
+	restart_confirmation_root = Control.new()
+	restart_confirmation_root.name = "RestartConfirmation"
+	restart_confirmation_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	restart_confirmation_root.visible = false
+	restart_confirmation_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	var restart_shade := ColorRect.new()
+	restart_shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	restart_shade.color = Color(0.025, 0.035, 0.07, 0.72)
+	restart_shade.mouse_filter = Control.MOUSE_FILTER_STOP
+	restart_confirmation_root.add_child(restart_shade)
+	restart_confirmation_panel = PanelContainer.new()
+	restart_confirmation_panel.set_anchors_preset(Control.PRESET_CENTER)
+	restart_confirmation_panel.offset_left = -270
+	restart_confirmation_panel.offset_top = -125
+	restart_confirmation_panel.offset_right = 270
+	restart_confirmation_panel.offset_bottom = 125
+	_style_wood_panel(restart_confirmation_panel, Color("432a1d"), Vector2(540, 250))
+	var restart_box := VBoxContainer.new()
+	restart_box.add_theme_constant_override("separation", 10)
+	var restart_title := Label.new()
+	restart_title.text = "¿REINICIAR LA PARTIDA?"
+	restart_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_cartoon_text(restart_title, 25)
+	restart_title.add_theme_color_override("font_color", Color("ffe39a"))
+	restart_box.add_child(restart_title)
+	var restart_description := Label.new()
+	restart_description.text = "Los cofres, las misiones y el ánimo de los vecinos volverán al inicio."
+	restart_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	restart_description.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_cartoon_text(restart_description, 18)
+	restart_description.add_theme_color_override("font_color", Color("fff0d0"))
+	restart_box.add_child(restart_description)
+	var restart_actions := HBoxContainer.new()
+	restart_actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	restart_actions.add_theme_constant_override("separation", 18)
+	var confirm_restart_button := Button.new()
+	confirm_restart_button.text = "SÍ, REINICIAR"
+	confirm_restart_button.custom_minimum_size = Vector2(190, 46)
+	_style_cartoon_text(confirm_restart_button, 19)
+	_style_wood_button(confirm_restart_button)
+	confirm_restart_button.pressed.connect(_confirm_restart_match)
+	restart_actions.add_child(confirm_restart_button)
+	var cancel_restart_button := Button.new()
+	cancel_restart_button.text = "CANCELAR"
+	cancel_restart_button.custom_minimum_size = Vector2(155, 46)
+	_style_cartoon_text(cancel_restart_button, 19)
+	_style_wood_button(cancel_restart_button)
+	cancel_restart_button.pressed.connect(_cancel_restart_confirmation)
+	restart_actions.add_child(cancel_restart_button)
+	restart_box.add_child(restart_actions)
+	restart_confirmation_panel.add_child(restart_box)
+	restart_confirmation_root.add_child(restart_confirmation_panel)
+	layer.add_child(restart_confirmation_root)
 	background_root.visible = false
 	gameplay_top_panel.visible = false
 	gameplay_bottom_panel.visible = false
 	gameplay_crosshair.visible = false
-	prompt.visible = false
+	prompt_panel.visible = false
 	timer_container.visible = false
+	restart_button.visible = false
 	_update_role_ui()
 	_update_information_hud()
+
+func _layout_game_hud() -> void:
+	if not is_instance_valid(timer_container):
+		return
+	if get_viewport().get_visible_rect().size.x >= 1120.0:
+		timer_container.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		timer_container.offset_left = -200
+		timer_container.offset_top = 16
+		timer_container.offset_right = -20
+		timer_container.offset_bottom = 84
+	else:
+		timer_container.set_anchors_preset(Control.PRESET_CENTER_TOP)
+		timer_container.offset_left = -90
+		timer_container.offset_top = 266
+		timer_container.offset_right = 90
+		timer_container.offset_bottom = 334
 
 func _cycle_solo_role() -> void:
 	if local_roles.size() < 2:
@@ -2344,6 +2709,51 @@ func _update_role_ui() -> void:
 		solo_role_button.text = "Roles: %s  ·  Activo: %s" % [", ".join(PackedStringArray(shown_roles)), _role_display_name(active_role)]
 	if network_button != null:
 		network_button.text = "Red: %d jugador(es)" % maxi(1, network_peer_ids.size())
+	_apply_role_hud_color()
+
+func _role_accent_color(role: String) -> Color:
+	match role:
+		"Ciudadano": return Color("f5c64e") # Héroe · amarillo
+		"Periodista": return Color("61b9f3") # Mensajero · azul
+		"Influencer": return Color("c17bea") # Bardo · morado
+		"Candidato a alcalde": return Color("f06a68") # Revolucionario · rojo
+		_: return Color("f5c64e")
+
+func _apply_role_hud_color() -> void:
+	var accent := _role_accent_color(active_role)
+	if is_instance_valid(gameplay_top_panel):
+		var mission_style := StyleBoxFlat.new()
+		mission_style.bg_color = Color(0, 0, 0, 0)
+		mission_style.border_color = Color(0, 0, 0, 0)
+		mission_style.set_border_width_all(0)
+		mission_style.content_margin_left = 0
+		mission_style.content_margin_right = 0
+		mission_style.content_margin_top = 0
+		mission_style.content_margin_bottom = 0
+		mission_panel_style = mission_style
+		gameplay_top_panel.add_theme_stylebox_override("panel", mission_style)
+	if is_instance_valid(hud):
+		hud.add_theme_color_override("font_color", accent.lightened(0.24))
+	if is_instance_valid(solo_role_button):
+		var normal := StyleBoxFlat.new()
+		normal.bg_color = Color("663d23")
+		normal.border_color = accent
+		normal.set_border_width_all(2)
+		normal.set_corner_radius_all(10)
+		normal.content_margin_left = 12
+		normal.content_margin_right = 12
+		var hover := normal.duplicate() as StyleBoxFlat
+		hover.bg_color = Color("80502a")
+		hover.border_color = accent.lightened(0.28)
+		var pressed := normal.duplicate() as StyleBoxFlat
+		pressed.bg_color = Color("432a1d")
+		solo_role_button.add_theme_stylebox_override("normal", normal)
+		solo_role_button.add_theme_stylebox_override("hover", hover)
+		solo_role_button.add_theme_stylebox_override("pressed", pressed)
+		solo_role_button.add_theme_stylebox_override("focus", hover)
+		solo_role_button.add_theme_color_override("font_color", accent.lightened(0.38))
+		solo_role_button.add_theme_color_override("font_hover_color", Color("fff7d7"))
+		solo_role_button.add_theme_color_override("font_pressed_color", accent.lightened(0.38))
 
 func _role_display_name(role: String) -> String:
 	match role:
@@ -2374,7 +2784,7 @@ func _open_network_panel() -> void:
 
 func _host_network_game() -> void:
 	var peer := ENetMultiplayerPeer.new()
-	var result := peer.create_server(7777, 4)
+	var result := peer.create_server(COOP_PORT, MAX_COOP_PLAYERS - 1)
 	if result != OK:
 		network_status.text = "No se pudo abrir el puerto 7777. Código: %d" % result
 		return
@@ -2382,7 +2792,9 @@ func _host_network_game() -> void:
 	is_network_host = true
 	is_solo_mode = false
 	network_peer_ids = [1]
-	network_status.text = "Sala creada en el puerto 7777. Comparte tu IP pública/LAN; esperando jugadores (2–4)."
+	network_player_names = {1: network_player_name}
+	pending_peer_passwords.clear()
+	network_status.text = "Sala creada en el puerto %d. Esperando jugadores (2–4)." % COOP_PORT
 	_update_role_ui()
 
 func _join_network_game() -> void:
@@ -2390,33 +2802,47 @@ func _join_network_game() -> void:
 	if address.is_empty():
 		network_status.text = "Escribe la IP del anfitrión."
 		return
+	if join_password.is_empty() and network_password_input != null:
+		join_password = network_password_input.text.strip_edges()
+	if join_password.is_empty():
+		network_status.text = "Escribe la contraseña de la sala."
+		return
 	var peer := ENetMultiplayerPeer.new()
-	var result := peer.create_client(address, 7777)
+	var result := peer.create_client(address, COOP_PORT)
 	if result != OK:
 		network_status.text = "No se pudo iniciar la conexión. Código: %d" % result
 		return
 	multiplayer.multiplayer_peer = peer
 	is_solo_mode = false
-	network_status.text = "Conectando con %s:7777…" % address
+	network_status.text = "Conectando con %s:%d…" % [address, COOP_PORT]
 
 func _on_network_peer_connected(peer_id: int) -> void:
 	if not is_network_host:
 		return
-	if not network_peer_ids.has(peer_id):
-		network_peer_ids.append(peer_id)
-		network_peer_ids.sort()
-		rpc_id(peer_id, "_receive_remote_transform", 1, player.global_position, player.rotation.y)
-	_update_role_ui()
-	if network_peer_ids.size() <= 4:
-		_assign_network_roles()
+	# A transport connection is not a room member until its password is checked.
+	pending_peer_passwords[peer_id] = true
+
+func _on_network_peer_disconnected(peer_id: int) -> void:
+	if not is_network_host:
+		return
+	pending_peer_passwords.erase(peer_id)
+	if network_peer_ids.has(peer_id):
+		network_peer_ids.erase(peer_id)
+		network_player_names.erase(peer_id)
+		_sync_room_members.rpc(network_player_names, random_room_name, random_room_code)
+		_sync_room_members(network_player_names, random_room_name, random_room_code)
+		_update_role_ui()
+		if network_peer_ids.size() >= 2:
+			_assign_network_roles()
 		if is_instance_valid(menu_root) and menu_root.visible:
 			_show_menu_page("lobby")
 
 func _on_connected_to_server() -> void:
-	network_status.text = "Conectado al anfitrión. Solicitando roles…"
+	network_status.text = "Conectado al anfitrión. Verificando contraseña…"
 	_show_menu_page("waiting")
 	_add_menu_label(network_status.text, 14)
-	rpc_id(1, "_request_network_roles")
+	rpc_id(1, "_submit_room_password", join_password.sha256_text(), network_player_name)
+	join_password = ""
 
 func _on_connection_failed() -> void:
 	network_status.text = "No se pudo conectar. Revisa la IP, el puerto 7777 y el firewall del anfitrión."
@@ -2427,6 +2853,10 @@ func _on_server_disconnected() -> void:
 	network_status.text = "Se perdió la conexión con el anfitrión."
 	multiplayer.multiplayer_peer = null
 	is_solo_mode = true
+	network_peer_ids.clear()
+	network_player_names.clear()
+	room_password = ""
+	room_password_hash = ""
 	role_assignments = ROLE_MANAGER.assign_roles(1)
 	local_roles = role_assignments[0]
 	active_role_index = 0
@@ -2447,11 +2877,85 @@ func _assign_network_roles() -> void:
 		else:
 			rpc_id(peer_id, "_receive_network_roles", roles_for_player)
 	network_status.text = "Roles sorteados sin repetir entre %d jugadores." % network_peer_ids.size()
+	if is_instance_valid(menu_root) and menu_root.visible:
+		_show_menu_page("lobby")
+		if network_status != null:
+			_add_menu_label(network_status.text, 14)
 
 @rpc("any_peer", "call_remote", "reliable")
-func _request_network_roles() -> void:
-	if multiplayer.is_server():
-		_assign_network_roles()
+func _submit_room_password(password_hash: String, player_name: String) -> void:
+	if not multiplayer.is_server():
+		return
+	var peer_id := multiplayer.get_remote_sender_id()
+	if not pending_peer_passwords.has(peer_id):
+		return
+	pending_peer_passwords.erase(peer_id)
+	var clean_name := player_name.strip_edges().substr(0, 24)
+	if password_hash != room_password_hash or clean_name.is_empty():
+		_reject_room_peer(peer_id, "Contraseña incorrecta o nombre de jugador vacío.")
+		return
+	if network_peer_ids.size() >= MAX_COOP_PLAYERS:
+		_reject_room_peer(peer_id, "La sala ya está llena.")
+		return
+	if not network_peer_ids.has(peer_id):
+		network_peer_ids.append(peer_id)
+		network_peer_ids.sort()
+	network_player_names[peer_id] = clean_name
+	rpc_id(peer_id, "_receive_remote_transform", 1, player.global_position, player.rotation.y)
+	_assign_network_roles()
+	_sync_room_members.rpc(network_player_names, random_room_name, random_room_code)
+	_sync_room_members(network_player_names, random_room_name, random_room_code)
+	rpc_id(peer_id, "_receive_room_password_result", true, "Acceso concedido.", random_room_name, random_room_code)
+	_update_role_ui()
+	if is_instance_valid(menu_root) and menu_root.visible:
+		_show_menu_page("lobby")
+		_add_menu_label("Sala: %s · Jugadores: %d/%d" % [random_room_name, network_peer_ids.size(), MAX_COOP_PLAYERS], 15)
+
+func _reject_room_peer(peer_id: int, message: String) -> void:
+	rpc_id(peer_id, "_receive_room_password_result", false, message, "", "")
+	get_tree().create_timer(0.5).timeout.connect(func():
+		var enet_peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+		if multiplayer.is_server() and enet_peer != null:
+			enet_peer.disconnect_peer(peer_id)
+	)
+
+@rpc("authority", "call_remote", "reliable")
+func _sync_room_members(names: Dictionary, room_name: String, room_code: String) -> void:
+	network_player_names = names.duplicate()
+	network_peer_ids.clear()
+	for peer_id in network_player_names.keys():
+		network_peer_ids.append(int(peer_id))
+	network_peer_ids.sort()
+	for peer_id in remote_players.keys():
+		var avatar := remote_players[peer_id] as Node3D
+		if not network_player_names.has(peer_id):
+			if is_instance_valid(avatar):
+				avatar.queue_free()
+			remote_players.erase(peer_id)
+			continue
+		if is_instance_valid(avatar):
+			var name_tag := avatar.get_node_or_null("PlayerName") as Label3D
+			if name_tag != null:
+				name_tag.text = String(network_player_names[peer_id])
+	random_room_name = room_name
+	random_room_code = room_code
+	_update_role_ui()
+	if is_instance_valid(menu_root) and menu_root.visible:
+		_show_menu_page("lobby")
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_room_password_result(accepted: bool, message: String, room_name: String, room_code: String) -> void:
+	if not accepted:
+		network_status.text = message
+		multiplayer.multiplayer_peer = null
+		join_password = ""
+		_show_menu_page("quick_join")
+		_add_menu_label(message, 15)
+		return
+	random_room_name = room_name
+	random_room_code = room_code
+	network_status.text = message
+	_show_menu_page("lobby")
 
 @rpc("authority", "call_remote", "reliable")
 func _receive_network_roles(roles_for_player: Array) -> void:
@@ -2470,6 +2974,13 @@ func _apply_network_roles(roles_for_player: Array) -> void:
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")
 func _receive_remote_transform(peer_id: int, position: Vector3, yaw: float) -> void:
+	if multiplayer.is_server():
+		var sender_id := multiplayer.get_remote_sender_id()
+		if sender_id <= 0 or sender_id != peer_id or not network_player_names.has(sender_id):
+			return
+		for recipient_id in network_peer_ids:
+			if recipient_id != sender_id and recipient_id != 1:
+				rpc_id(recipient_id, "_receive_remote_transform", peer_id, position, yaw)
 	if peer_id == multiplayer.get_unique_id():
 		return
 	var avatar := remote_players.get(peer_id) as Node3D
@@ -2485,6 +2996,16 @@ func _receive_remote_transform(peer_id: int, position: Vector3, yaw: float) -> v
 		material.albedo_color = Color("38c9d2") if peer_id % 2 == 0 else Color("f28e4b")
 		body.material_override = material
 		avatar.add_child(body)
+		var name_tag := Label3D.new()
+		name_tag.name = "PlayerName"
+		name_tag.text = String(network_player_names.get(peer_id, "Jugador %d" % peer_id))
+		name_tag.position = Vector3(0, 1.25, 0)
+		name_tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		name_tag.no_depth_test = true
+		name_tag.font_size = 32
+		name_tag.outline_size = 6
+		name_tag.pixel_size = 0.008
+		avatar.add_child(name_tag)
 		add_child(avatar)
 		remote_players[peer_id] = avatar
 	avatar.global_position = position
@@ -2547,10 +3068,12 @@ func _exit_network_game() -> void:
 func _update_nearest_station() -> void:
 	if panel != null and panel.visible:
 		prompt.text = "E  ·  Cerrar"
+		prompt_panel.visible = true
 		return
 	var target := _nearest_interaction_target()
 	if target.is_empty():
 		prompt.text = ""
+		prompt_panel.visible = false
 		return
 	match String(target.kind):
 		"chest":
@@ -2574,7 +3097,13 @@ func _update_nearest_station() -> void:
 				"Periodista": prompt.text = "Entrevista lista · " + String(target.name) if interviewed_npcs.has(target.npc_index) else "E  ·  Hablar y resolver acertijo con " + String(target.name)
 				"Influencer":
 					if not influencer_has_information:
-						prompt.text = "Espera %d s" % ceili(float(bard_cooldowns.get(int(target.npc_index), 0.0))) if float(bard_cooldowns.get(int(target.npc_index), 0.0)) > 0.0 else "E  ·  Animar un poco a " + String(target.name)
+						var cooldown := float(bard_cooldowns.get(int(target.npc_index), 0.0))
+						if cooldown > 0.0:
+							prompt.text = "Bardo · espera %d s para volver a animar" % ceili(cooldown)
+						elif bard_cheer_target == int(target.npc_index):
+							prompt.text = "Mantén E · Animando %d%% (8 s)" % roundi(bard_cheer_elapsed / BARD_CHEER_HOLD_DURATION * 100.0)
+						else:
+							prompt.text = "Mantén E durante 8 s · Animar un poco a " + String(target.name)
 					elif informed_npcs.has(target.npc_index):
 						prompt.text = "Información entregada · " + String(target.name)
 					elif int(target.npc_index) == informed_npcs.size():
@@ -2583,6 +3112,7 @@ func _update_nearest_station() -> void:
 						prompt.text = "Entrega primero al siguiente vecino"
 				"Candidato a alcalde": prompt.text = "Ánimo recargando · %d%%" % mood_percent if state.recharging else "E  ·  Animar a " + String(target.name) + "  ·  Ánimo %d%%" % mood_percent
 				_: prompt.text = "El Héroe no tiene una acción con este vecino"
+	prompt_panel.visible = not prompt.text.is_empty()
 
 func _nearest_interaction_target() -> Dictionary:
 	var nearest: Dictionary = {}
@@ -2676,14 +3206,14 @@ func _open_nearest_station() -> void:
 func _update_information_hud() -> void:
 	if hud == null:
 		return
-	var status := "Fichas %d / %d    ·    Vecinos %d / %d" % [collected_info.size(), info_chests.size(), informed_npcs.size(), npc_targets.size()]
+	var status := "INFORMACIÓN   %d / %d     ·     VECINOS   %d / %d" % [collected_info.size(), info_chests.size(), informed_npcs.size(), npc_targets.size()]
 	if is_solo_mode:
-		status += "\n%s  ·  %s" % [_role_display_name(active_role), _role_mission(active_role)]
+		status += "\nMISIÓN · %s\n%s" % [_role_display_name(active_role).to_upper(), _role_mission(active_role)]
 	else:
 		var missions: Array[String] = []
 		for role in local_roles:
-			missions.append("%s: %s" % [_role_display_name(String(role)), _role_mission(String(role))])
-		status += "\n" + "   ·   ".join(PackedStringArray(missions))
+			missions.append("%s  ·  %s" % [_role_display_name(String(role)).to_upper(), _role_mission(String(role))])
+		status += "\nMISIONES DEL EQUIPO\n" + "\n".join(PackedStringArray(missions))
 	hud.text = status
 	_check_game_completion()
 
@@ -2773,11 +3303,7 @@ func _answer_journalist_claim(answer_is_true: bool) -> void:
 
 func _share_info_to_npc(npc_index: int) -> void:
 	if not influencer_has_information:
-		if float(bard_cooldowns.get(npc_index, 0.0)) <= 0.0:
-			_cheer_npc(npc_index, 1.0 / 3.0)
-			panel_text.text = "El Bardo elevó un tercio el ánimo del vecino mientras espera los datos del Mensajero."
-		else:
-			panel_text.text = "El vecino escucha la canción. Espera un momento para animarlo de nuevo."
+		panel_text.text = "Mantén E junto al vecino durante 8 segundos. El Bardo aumentará su ánimo en un tercio."
 		return
 	if informed_npcs.has(npc_index):
 		panel_text.text = "Este vecino ya recibió la información verificada."
@@ -2983,6 +3509,25 @@ func _add_glow_marker(at: Vector3) -> void:
 	light.omni_range = 5
 	add_child(light)
 
+func _game_ui_atlas_region(region: Rect2) -> AtlasTexture:
+	var atlas_texture := AtlasTexture.new()
+	atlas_texture.atlas = load(GAME_UI_ATLAS_PATH) as Texture2D
+	atlas_texture.region = region
+	return atlas_texture
+
+func _style_atlas_panel(target: PanelContainer, minimum_size: Vector2 = Vector2.ZERO) -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0, 0, 0, 0)
+	style.border_color = Color(0, 0, 0, 0)
+	style.set_border_width_all(0)
+	style.content_margin_left = 0
+	style.content_margin_right = 0
+	style.content_margin_top = 0
+	style.content_margin_bottom = 0
+	target.add_theme_stylebox_override("panel", style)
+	if minimum_size != Vector2.ZERO:
+		target.custom_minimum_size = minimum_size
+
 func _style_panel(target: PanelContainer, background: Color, border: Color) -> void:
 	var style := StyleBoxFlat.new()
 	style.bg_color = background
@@ -2994,3 +3539,41 @@ func _style_panel(target: PanelContainer, background: Color, border: Color) -> v
 	style.content_margin_top = 8
 	style.content_margin_bottom = 8
 	target.add_theme_stylebox_override("panel", style)
+
+func _style_wood_panel(target: PanelContainer, background: Color = Color("432a1d"), minimum_size: Vector2 = Vector2.ZERO) -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = background
+	style.border_color = Color("e8b44e")
+	style.set_border_width_all(3)
+	style.set_corner_radius_all(14)
+	style.shadow_color = Color(0.08, 0.035, 0.015, 0.58)
+	style.shadow_size = 8
+	style.shadow_offset = Vector2(0, 4)
+	style.content_margin_left = 18
+	style.content_margin_right = 18
+	style.content_margin_top = 12
+	style.content_margin_bottom = 12
+	target.add_theme_stylebox_override("panel", style)
+	if minimum_size != Vector2.ZERO:
+		target.custom_minimum_size = minimum_size
+
+func _style_wood_button(target: Button) -> void:
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color("663d23")
+	normal.border_color = Color("e9b84d")
+	normal.set_border_width_all(2)
+	normal.set_corner_radius_all(10)
+	normal.content_margin_left = 12
+	normal.content_margin_right = 12
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = Color("80502a")
+	hover.border_color = Color("fff0ad")
+	var pressed := normal.duplicate() as StyleBoxFlat
+	pressed.bg_color = Color("432a1d")
+	target.add_theme_stylebox_override("normal", normal)
+	target.add_theme_stylebox_override("hover", hover)
+	target.add_theme_stylebox_override("pressed", pressed)
+	target.add_theme_stylebox_override("focus", hover)
+	target.add_theme_color_override("font_color", Color("fff0bd"))
+	target.add_theme_color_override("font_hover_color", Color("fff7d7"))
+	target.add_theme_color_override("font_pressed_color", Color("fff0bd"))
