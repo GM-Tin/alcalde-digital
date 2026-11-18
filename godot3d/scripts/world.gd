@@ -1,0 +1,2952 @@
+@tool
+extends Node3D
+
+const PLAYER_SCENE := "res://assets/kenney/characters/Models/GLB format/character-male-a.glb"
+const CITY := "res://assets/kenney/city/Models/GLB format/"
+const ARCADE := "res://assets/kenney/arcade/Models/GLB format/"
+const DUNGEON := "res://assets/kenney/dungeon/Models/GLB format/"
+const ARENA := "res://assets/kenney/arena/Models/GLB format/"
+const CHARACTERS := "res://assets/kenney/characters/Models/GLB format/"
+const ZONE_LENGTH := 72.0
+const ZONE_WIDTH := 30.0
+const WORLD_LENGTH := ZONE_LENGTH * 3.0
+const MAP_SCALE := 1.5
+const NPC_MOOD_DURATION := 80.0
+const NPC_MOOD_RECHARGE_DURATION := 2.5
+const GAME_DURATION_SECONDS := 600.0
+const MENU_BACKGROUND_PATH := "res://assets/ui/medieval_menu_background.png"
+const MENU_BUTTONS_PATH := "res://assets/ui/medieval_buttons_atlas.png"
+const CARTOON_FONT: FontFile = preload("res://assets/ui/fonts/LilitaOne-Regular.ttf")
+const CHEST_PROGRESS_PATH := "user://chest_progress.cfg"
+const DAY_PHASE_DURATION := 240.0
+const CHEST_OPEN_SOUND_PATH := "res://assets/audio/chest_open.wav"
+const ROLE_MANAGER := preload("res://scripts/role_manager.gd")
+
+var player: CharacterBody3D
+var camera: Camera3D
+var overview_camera: Camera3D
+var prompt: Label
+var ui_layer: CanvasLayer
+var hint: Label
+var hud: Label
+var panel: PanelContainer
+var panel_text: Label
+var question_index := -1
+var answered := 0
+var role_assignments: Array = []
+var local_roles: Array = []
+var active_role_index := 0
+var active_role := "Ciudadano"
+var solo_role_button: Button
+var network_button: Button
+var network_panel: PanelContainer
+var network_status: Label
+var address_input: LineEdit
+var cheered_npcs: Dictionary = {}
+var is_solo_mode := true
+var is_network_host := false
+var network_peer_ids: Array[int] = []
+var bard_cooldowns: Dictionary = {}
+var remote_players: Dictionary = {}
+var network_sync_elapsed := 0.0
+var interviewed_npcs: Dictionary = {}
+var informed_npcs: Dictionary = {}
+var journalist_puzzle_npc := -1
+var journalist_puzzle_sequence: Array[int] = []
+var journalist_puzzle_input: Array[int] = []
+var journalist_claim_index := -1
+var journalist_results: Array[String] = []
+var journalist_verified := false
+var influencer_has_information := false
+var journalist_claims := [
+	{"statement":"Un mensaje sin fuente demuestra que el centro comunitario va a cerrar.", "is_true":false},
+	{"statement":"Una encuesta hecha a tres amigos representa a todo el barrio.", "is_true":false},
+	{"statement":"Antes de compartir una cifra hay que revisar su fecha y su fuente original.", "is_true":true}
+]
+var stations: Array[Dictionary] = []
+var info_chests: Array[Dictionary] = []
+var npc_targets: Array[Dictionary] = []
+var npc_night_lights: Array[OmniLight3D] = []
+var chest_lights: Array[OmniLight3D] = []
+var firefly_nodes: Array[Node3D] = []
+var firefly_lights: Array[OmniLight3D] = []
+var firefly_orbs: Array[MeshInstance3D] = []
+var firefly_time := 0.0
+var ticket_machine_position := Vector3(-10000, 0, 0)
+var roulette_position := Vector3(-10000, 0, 0)
+var roulette_interaction_range := 6.0
+var roulette_node: Node3D
+var roulette_used := false
+var npc_mood_duration := NPC_MOOD_DURATION
+var game_time_remaining := GAME_DURATION_SECONDS
+var game_running := false
+var lights_enabled := true
+var menu_root: Control
+var menu_panel: PanelContainer
+var menu_content: VBoxContainer
+var gameplay_top_panel: PanelContainer
+var gameplay_bottom_panel: PanelContainer
+var gameplay_crosshair: Label
+var gameplay_started := false
+var time_progress: ProgressBar
+var time_crown: Label
+var timer_container: Control
+var volume_slider: HSlider
+var scale_picker: OptionButton
+var room_code_input: LineEdit
+var room_name_input: LineEdit
+var random_room_name := ""
+var menu_status: Label
+var random_room_code := ""
+var game_timer_timeout := false
+var speed_boost_time := 0.0
+var sun_light: DirectionalLight3D
+var day_environment: Environment
+var day_sky: ShaderMaterial
+var day_cycle_elapsed := 0.0
+var day_phase_presets: Array[Dictionary] = []
+var chest_open_stream: AudioStreamWAV
+var collected_info: Dictionary = {}
+var info_delivered := false
+var questions := [
+	{"title":"El mensaje viral", "body":"Un mensaje afirma que cerrarán el centro comunitario. No cita ninguna fuente. ¿Qué haces?", "answers":["Lo reenvío ya", "Busco una fuente oficial", "Lo cambio para que asuste más"], "correct":1, "fact":"Verificar en canales oficiales evita que un rumor se convierta en una alarma."},
+	{"title":"La encuesta", "body":"Una encuesta solo preguntó a tus tres amigos. ¿Representa a todo el barrio?", "answers":["Sí, es suficiente", "No, la muestra es muy pequeña", "Solo si la publico muchas veces"], "correct":1, "fact":"Una muestra pequeña o sesgada no describe a toda la comunidad."},
+	{"title":"La propuesta", "body":"Una propuesta promete arreglar todas las calles, pero no explica cómo. ¿Qué pregunta ayuda?", "answers":["¿Cuál es el plan y el presupuesto?", "¿Quién tiene más seguidores?", "¿Puedo ponerle un emoji?"], "correct":0, "fact":"Pedir plan, responsables y presupuesto permite comparar propuestas con criterio."},
+	{"title":"El archivo", "body":"Encuentras dos versiones de una cifra. ¿Cuál es el siguiente paso?", "answers":["Comparar fecha y fuente original", "Elegir la que me gusta", "Publicar las dos como ciertas"], "correct":0, "fact":"La fecha y el origen de los datos ayudan a entender qué versión es fiable."}
+]
+
+func _ready() -> void:
+	if Engine.is_editor_hint():
+		# Build the diorama as owned scene nodes so the level is editable and savable.
+		if get_node_or_null("DioramaBase") == null:
+			_build_world()
+			_set_scene_owners(self, self)
+		# Some placed Kenney structures were missing physics bodies. Repair only
+		# imported asset instances without a collider, preserving the edited layout.
+		_repair_asset_collisions(self)
+		return
+	_build_loading_screen()
+	await get_tree().process_frame
+	if get_node_or_null("DioramaBase") == null:
+		_build_world()
+	role_assignments = ROLE_MANAGER.assign_roles(1)
+	local_roles = role_assignments[0]
+	active_role = String(local_roles[active_role_index])
+	_repair_asset_collisions(self)
+	_scale_map_up()
+	# Let the physics server register saved geometry before placing guards on clear ground.
+	await get_tree().physics_frame
+	_setup_npcs()
+	_discover_information_chests()
+	_find_ticket_machine()
+	_find_roulette()
+	_setup_day_night_cycle()
+	_setup_fireflies()
+	lights_enabled = _load_setting_bool("lights_enabled", true)
+	_on_lights_toggled(lights_enabled)
+	_load_chest_open_sound()
+	_build_player()
+	_build_ui()
+	lights_enabled = _load_setting_bool("lights_enabled", true)
+	_on_volume_changed(_load_setting_float("volume", 0.8))
+	get_window().content_scale_factor = _load_setting_float("ui_scale", 1.0)
+	multiplayer.peer_connected.connect(_on_network_peer_connected)
+	multiplayer.connected_to_server.connect(_on_connected_to_server)
+	multiplayer.connection_failed.connect(_on_connection_failed)
+	multiplayer.server_disconnected.connect(_on_server_disconnected)
+	_build_camera()
+	player.controls_enabled = false
+	player.set_physics_process(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_show_menu_page("home")
+	_set_gameplay_ui_visible(false)
+	if is_instance_valid(get_node_or_null("LoadingScreen")):
+		get_node("LoadingScreen").queue_free()
+
+func _set_scene_owners(node: Node, scene_root: Node) -> void:
+	for child in node.get_children():
+		child.owner = scene_root
+		_set_scene_owners(child, scene_root)
+
+func _scale_map_up() -> void:
+	if has_meta("expanded_map_applied"):
+		return
+	for child in get_children():
+		if not child is Node3D:
+			continue
+		var map_object := child as Node3D
+		var transform := map_object.global_transform
+		transform.origin *= MAP_SCALE
+		if not _is_chest_instance(map_object):
+			transform.basis = transform.basis.scaled(Vector3.ONE * MAP_SCALE)
+		map_object.global_transform = transform
+	set_meta("expanded_map_applied", true)
+
+func _is_chest_instance(node: Node3D) -> bool:
+	return node.scene_file_path.to_lower().contains("chest.glb") or node.name.to_lower().contains("chest")
+
+func _repair_asset_collisions(node: Node) -> void:
+	for child in node.get_children():
+		# Remove legacy oversized aggregate boxes from the running/editor scene.
+		if child.name == "ReliableBoundsCollider":
+			child.queue_free()
+			continue
+		# Discard old stair and step colliders. Their fitted ramps are rebuilt from
+		# each stair's actual world bounds below, avoiding stacked convex/trimesh
+		# shapes that used to trap the player between treads.
+		if child is StaticBody3D:
+			var collider_name := String(child.name).to_lower()
+			var is_old_stair_collider := collider_name.contains("climbablestaircollider") or (collider_name.contains("stair") and (collider_name.contains("collider") or collider_name.contains("ramp")) and not collider_name.begins_with("fittedstairramp_"))
+			if is_old_stair_collider:
+				child.queue_free()
+				continue
+		if child is Node3D and (child as Node3D).scene_file_path.to_lower().ends_with("stairs.glb"):
+			_clear_stair_asset_collisions(child as Node3D)
+			_add_stair_ramp_collision(child as Node3D)
+			continue
+		if child is StaticBody3D and (child.name.to_lower().contains("floor") or child.name == "DioramaBase"):
+			child.collision_layer = 1
+			child.collision_mask = 1
+		# Many barrels in the editable scene are loose MeshInstance3D nodes, not
+		# imported scene roots. Give each one a fitted cylinder collider of its own.
+		if child is MeshInstance3D and child.mesh != null and child.name.to_lower().contains("barrel"):
+			_add_barrel_cylinder_collision(child)
+		if child is MeshInstance3D and child.mesh != null and child.name.to_lower().contains("column"):
+			_add_column_mesh_collision(child)
+		if child is MeshInstance3D and child.mesh != null and _has_asset_keyword(child, ["pot", "urn", "vase", "jar"]):
+			_add_fitted_object_collider(child, true, "ContainerFittedCollider")
+		if child is MeshInstance3D and child.mesh != null and _is_floor_tile_mesh(child):
+			_add_fitted_object_collider(child, false, "FloorTileFittedCollider")
+		if child is MeshInstance3D and child.mesh != null and _is_tree_or_stone_mesh(child):
+			_add_convex_object_collision(child)
+		if child is MeshInstance3D and child.mesh != null and _is_block_mesh(child):
+			_add_fitted_object_collider(child, false, "BlockFittedCollider")
+		if child is MeshInstance3D and child.mesh != null and _is_stair_mesh(child):
+			_clear_stair_asset_collisions(child)
+			_add_stair_ramp_collision(child)
+			continue
+		if child is MeshInstance3D and child.mesh != null and _is_bridge_or_statue_mesh(child):
+			_add_convex_object_collision(child)
+		if child is MeshInstance3D and child.mesh != null and _has_asset_keyword(child, ["pedestal", "statue-base", "statue_base"]):
+			_add_fitted_object_collider(child, false, "PedestalFittedCollider")
+		if child is MeshInstance3D and child.mesh != null and _has_asset_keyword(child, ["flag", "banner"]):
+			_add_fitted_object_collider(child, false, "FlagFittedCollider")
+		if child is MeshInstance3D and child.mesh != null and _is_tower_piece_mesh(child):
+			_add_convex_object_collision(child)
+		if child is Node3D:
+			var meshes := child.find_children("*", "MeshInstance3D", true, false)
+			var has_direct_mesh := false
+			for asset_child in child.get_children():
+				if asset_child is MeshInstance3D:
+					has_direct_mesh = true
+					break
+			var has_imported_ancestor := false
+			var ancestor := child.get_parent()
+			while ancestor:
+				if ancestor is Node3D and not ancestor.scene_file_path.is_empty():
+					has_imported_ancestor = true
+					break
+				ancestor = ancestor.get_parent()
+			# Imported scenes and hand-placed mesh groups both need coverage. This
+			# catches simple editor-created props that have no scene_file_path.
+			var is_graphic_asset := not child.scene_file_path.is_empty() or (has_direct_mesh and not has_imported_ancestor)
+			if is_graphic_asset and not meshes.is_empty():
+				var existing_shapes := child.find_children("*", "CollisionShape3D", true, false)
+				if existing_shapes.is_empty():
+					var replaced_floor_meshes := false
+					for mesh_node in meshes:
+						var floor_mesh := mesh_node as MeshInstance3D
+						if floor_mesh and _is_floor_tile_mesh(floor_mesh):
+							_add_fitted_object_collider(floor_mesh, false, "FloorTileFittedCollider")
+							replaced_floor_meshes = true
+					if not replaced_floor_meshes:
+						_add_mesh_collisions(child)
+					if Engine.is_editor_hint():
+						_set_scene_owners(child, get_tree().edited_scene_root)
+		_repair_asset_collisions(child)
+
+func _add_barrel_cylinder_collision(barrel: MeshInstance3D) -> void:
+	_add_fitted_object_collider(barrel, true, "BarrelFittedCollider")
+
+func _add_column_mesh_collision(column: MeshInstance3D) -> void:
+	_add_fitted_object_collider(column, false, "ColumnFittedCollider")
+
+func _add_fitted_object_collider(graphic: MeshInstance3D, cylindrical: bool, suffix: String) -> void:
+	var parent_node := graphic.get_parent()
+	if parent_node == null:
+		return
+	var body_name := String(graphic.name) + "_" + suffix
+	if parent_node.get_node_or_null(NodePath(body_name)) != null:
+		return
+	# Compute bounds in world space, then put an unscaled StaticBody beside the
+	# graphic. The previous child collider inherited extreme mesh scales, which
+	# can make it appear present while the physics body fails to block the player.
+	var local_bounds := graphic.mesh.get_aabb()
+	var world_bounds: AABB = graphic.global_transform * local_bounds
+	if world_bounds.size.x < 0.03 or world_bounds.size.y < 0.03 or world_bounds.size.z < 0.03:
+		return
+	var body := StaticBody3D.new()
+	body.name = body_name
+	body.collision_layer = 1
+	body.collision_mask = 1
+	parent_node.add_child(body)
+	body.global_transform = Transform3D(Basis.IDENTITY, world_bounds.get_center())
+	var collision := CollisionShape3D.new()
+	if cylindrical:
+		var cylinder := CylinderShape3D.new()
+		cylinder.height = world_bounds.size.y
+		cylinder.radius = maxf(world_bounds.size.x, world_bounds.size.z) * 0.5
+		collision.shape = cylinder
+	else:
+		var box := BoxShape3D.new()
+		box.size = world_bounds.size
+		collision.shape = box
+	body.add_child(collision)
+	collision.owner = get_tree().edited_scene_root if Engine.is_editor_hint() else null
+	body.owner = get_tree().edited_scene_root if Engine.is_editor_hint() else null
+
+func _is_tree_or_stone_mesh(graphic: MeshInstance3D) -> bool:
+	var node: Node = graphic
+	while node:
+		var key := node.name.to_lower()
+		if node is Node3D:
+			key += " " + (node as Node3D).scene_file_path.to_lower()
+		if key.contains("tree") or key.contains("rock") or key.contains("stone"):
+			return true
+		node = node.get_parent()
+	return false
+
+func _is_block_mesh(graphic: MeshInstance3D) -> bool:
+	return _has_asset_keyword(graphic, ["block"])
+
+func _is_floor_tile_mesh(graphic: MeshInstance3D) -> bool:
+	if _has_asset_keyword(graphic, ["floor-detail"]):
+		return false
+	return graphic.name.to_lower().contains("floor") or _has_asset_keyword(graphic, ["floor.glb"])
+
+func _is_stair_mesh(graphic: MeshInstance3D) -> bool:
+	return _has_asset_keyword(graphic, ["stair", "stairs"])
+
+func _is_bridge_or_statue_mesh(graphic: MeshInstance3D) -> bool:
+	return _has_asset_keyword(graphic, ["bridge", "statue"])
+
+func _is_tower_piece_mesh(graphic: MeshInstance3D) -> bool:
+	if _has_asset_keyword(graphic, ["wall-opening"]):
+		return false
+	return _has_asset_keyword(graphic, ["tower", "watchtower", "turret", "castle", "fort", "building", "skyscraper", "wall", "gate"])
+
+func _has_asset_keyword(graphic: MeshInstance3D, keywords: Array[String]) -> bool:
+	var node: Node = graphic
+	while node:
+		var key := node.name.to_lower()
+		if node is Node3D:
+			key += " " + (node as Node3D).scene_file_path.to_lower()
+		for keyword in keywords:
+			if key.contains(keyword):
+				return true
+		node = node.get_parent()
+	return false
+
+func _add_convex_object_collision(graphic: MeshInstance3D) -> void:
+	var parent_node := graphic.get_parent()
+	if parent_node == null:
+		return
+	var suffix := "FittedConvexCollider"
+	var body_name := String(graphic.name) + "_" + suffix
+	if parent_node.get_node_or_null(NodePath(body_name)) != null:
+		return
+	var convex := graphic.mesh.create_convex_shape()
+	if convex == null or convex.points.size() < 4:
+		return
+	var world_bounds: AABB = graphic.global_transform * graphic.mesh.get_aabb()
+	var center := world_bounds.get_center()
+	var world_points := PackedVector3Array()
+	world_points.resize(convex.points.size())
+	for i in range(convex.points.size()):
+		world_points[i] = graphic.global_transform * convex.points[i] - center
+	convex.points = world_points
+	var body := StaticBody3D.new()
+	body.name = body_name
+	body.collision_layer = 1
+	body.collision_mask = 1
+	parent_node.add_child(body)
+	body.global_transform = Transform3D(Basis.IDENTITY, center)
+	var collision := CollisionShape3D.new()
+	collision.shape = convex
+	body.add_child(collision)
+	body.owner = get_tree().edited_scene_root if Engine.is_editor_hint() else null
+	collision.owner = get_tree().edited_scene_root if Engine.is_editor_hint() else null
+
+func _clear_stair_asset_collisions(stair_root: Node3D) -> void:
+	for candidate in stair_root.find_children("*", "StaticBody3D", true, false):
+		var body := candidate as StaticBody3D
+		var lower_name := body.name.to_lower()
+		if lower_name == "assetmeshcollision" or lower_name.contains("fittedconvexcollider") or lower_name.contains("stair"):
+			body.queue_free()
+	var parent_node := stair_root.get_parent()
+	if parent_node == null:
+		return
+	var prefix := String(stair_root.name).to_lower()
+	for sibling in parent_node.get_children():
+		if sibling == stair_root or not sibling is StaticBody3D:
+			continue
+		var lower_name := sibling.name.to_lower()
+		if lower_name.begins_with(prefix) and (lower_name.contains("collision") or lower_name.contains("ramp")):
+			sibling.queue_free()
+
+func _add_stair_ramp_collision(stair_root: Node3D) -> void:
+	var parent_node := stair_root.get_parent()
+	if parent_node == null:
+		return
+	var body_name := "FittedStairRamp_" + String(stair_root.name).validate_node_name()
+	if parent_node.get_node_or_null(NodePath(body_name)) != null:
+		return
+	var bounds := _world_visual_bounds(stair_root)
+	if bounds.size.y < 0.08 or bounds.size.x < 0.08 or bounds.size.z < 0.08:
+		return
+	var run_dir := stair_root.global_transform.basis * Vector3(0, 0, -1)
+	run_dir.y = 0.0
+	if run_dir.length_squared() < 0.0001:
+		return
+	run_dir = run_dir.normalized()
+	var width_dir := stair_root.global_transform.basis * Vector3.RIGHT
+	width_dir.y = 0.0
+	if width_dir.length_squared() < 0.0001:
+		width_dir = Vector3(-run_dir.z, 0, run_dir.x)
+	else:
+		width_dir = width_dir.normalized()
+	var horizontal_run := bounds.size.x * absf(run_dir.x) + bounds.size.z * absf(run_dir.z)
+	var horizontal_width := bounds.size.x * absf(width_dir.x) + bounds.size.z * absf(width_dir.z)
+	if horizontal_run < 0.1 or horizontal_width < 0.1:
+		return
+	var rise := bounds.size.y
+	if stair_root.has_meta("stair_ramp_length"):
+		horizontal_run = float(stair_root.get_meta("stair_ramp_length"))
+	if stair_root.has_meta("stair_ramp_rise"):
+		rise = float(stair_root.get_meta("stair_ramp_rise"))
+	var slope_direction := (run_dir * horizontal_run + Vector3.UP * rise).normalized()
+	var slope_normal := width_dir.cross(slope_direction).normalized()
+	if slope_normal.y < 0.0:
+		slope_normal = -slope_normal
+		width_dir = -width_dir
+	var ramp_basis := Basis(slope_direction, slope_normal, width_dir)
+	var body := StaticBody3D.new()
+	body.name = body_name
+	body.collision_layer = 1
+	body.collision_mask = 1
+	parent_node.add_child(body)
+	body.global_transform = Transform3D(ramp_basis, bounds.get_center())
+	var collision := CollisionShape3D.new()
+	var ramp_shape := BoxShape3D.new()
+	ramp_shape.size = Vector3(sqrt(horizontal_run * horizontal_run + rise * rise) + 0.05, 0.14, horizontal_width + 0.12)
+	collision.shape = ramp_shape
+	body.add_child(collision)
+	var scene_root := get_tree().edited_scene_root if Engine.is_editor_hint() else null
+	body.owner = scene_root
+	collision.owner = scene_root
+
+func _process(delta: float) -> void:
+	if Engine.is_editor_hint():
+		return
+	if game_running:
+		_update_npc_moods(delta)
+		_update_npc_facing(delta)
+		_update_speed_boost(delta)
+		_update_day_night_cycle(delta)
+		_animate_fireflies(delta)
+		_update_nearest_station()
+		game_time_remaining = maxf(0.0, game_time_remaining - delta)
+		_update_timer_hud()
+		if game_time_remaining <= 0.0 and not game_timer_timeout:
+			game_timer_timeout = true
+			_end_game(false)
+	if multiplayer.multiplayer_peer != null and player != null:
+		network_sync_elapsed += delta
+		if network_sync_elapsed >= 0.08:
+			network_sync_elapsed = 0.0
+			rpc("_receive_remote_transform", multiplayer.get_unique_id(), player.global_position, player.rotation.y)
+
+func _unhandled_input(event: InputEvent) -> void:
+	# Keep gameplay controls completely inactive while any menu or lobby is open.
+	if not game_running:
+		return
+	if game_running and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB:
+		_cycle_solo_role()
+		get_viewport().set_input_as_handled()
+		return
+	if journalist_puzzle_npc >= 0 and event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode >= KEY_1 and event.keycode <= KEY_3:
+			_answer_interview_puzzle(int(event.keycode - KEY_0))
+			get_viewport().set_input_as_handled()
+			return
+	if journalist_claim_index >= 0 and event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_1:
+			_answer_journalist_claim(true)
+			get_viewport().set_input_as_handled()
+			return
+		if event.keycode == KEY_2:
+			_answer_journalist_claim(false)
+			get_viewport().set_input_as_handled()
+			return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F1:
+		_toggle_map_overview()
+		return
+	if event.is_action_pressed("interact"):
+		if panel != null and panel.visible:
+			_close_question()
+		else:
+			_open_nearest_station()
+	elif question_index >= 0 and event is InputEventKey and event.pressed and not event.echo:
+		var num: int = event.keycode - KEY_1
+		if num >= 0 and num <= 2:
+			_answer(num)
+		elif event.keycode == KEY_ESCAPE:
+			_close_question()
+
+func _build_world() -> void:
+	var env := WorldEnvironment.new()
+	var environment := Environment.new()
+	environment.background_mode = Environment.BG_SKY
+	var sky := Sky.new()
+	var sky_mat := ShaderMaterial.new()
+	sky_mat.shader = load("res://scripts/dynamic_sky.gdshader")
+	sky_mat.set_shader_parameter("zenith_color", Vector3(0.09, 0.15, 0.25))
+	sky_mat.set_shader_parameter("horizon_color", Vector3(0.45, 0.56, 0.67))
+	sky_mat.set_shader_parameter("ground_color", Vector3(0.08, 0.10, 0.17))
+	sky.sky_material = sky_mat
+	environment.sky = sky
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color("8296b2")
+	environment.ambient_light_energy = 0.2
+	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	# A restrained bloom halo keeps emissive props readable across the whole map.
+	environment.glow_enabled = true
+	environment.glow_intensity = 0.32
+	environment.glow_bloom = 0.06
+	env.environment = environment
+	add_child(env)
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-48, -25, 0)
+	sun.light_energy = 0.24
+	sun.shadow_enabled = true
+	add_child(sun)
+	# One continuous diorama base supports all three adjoining biomes.
+	_add_box("DioramaBase", Vector3(WORLD_LENGTH * 0.5, -3.5, 0), Vector3(WORLD_LENGTH + 8, 0.5, ZONE_WIDTH + 8), Color("282b38"), true)
+	for zone in range(3):
+		_build_continuous_zone(zone, float(zone) * ZONE_LENGTH)
+	# One learning station sits near the far end of each continuous biome.
+	stations = [
+		{"position":Vector3(66, 0, 0), "model":ARCADE + "ticket-machine.glb", "title":"Estación de verificación"},
+		{"position":Vector3(138, 0, 0), "model":ARCADE + "prize-wheel.glb", "title":"Estación de datos"},
+		{"position":Vector3(210, 0, 0), "model":DUNGEON + "chest.glb", "title":"Estación de propuestas"}
+	]
+	for i in range(stations.size()):
+		var st: Dictionary = stations[i]
+		_add_model(st.model, st.position, Vector3(2.5, 2.5, 2.5), self, true)
+		_add_glow_marker(st.position + Vector3(0, 1.8, 0))
+		st["question"] = i
+		stations[i] = st
+	_add_box("WorldNorthBoundary", Vector3(WORLD_LENGTH * 0.5, 1.0, -15.25), Vector3(WORLD_LENGTH, 2, 0.5), Color.BLACK, true, false)
+	_add_box("WorldSouthBoundary", Vector3(WORLD_LENGTH * 0.5, 1.0, 15.25), Vector3(WORLD_LENGTH, 2, 0.5), Color.BLACK, true, false)
+	_add_box("WorldStartBoundary", Vector3(-2.0, 1.0, 0), Vector3(0.5, 2, ZONE_WIDTH), Color.BLACK, true, false)
+	_add_box("WorldEndBoundary", Vector3(WORLD_LENGTH + 2.0, 1.0, 0), Vector3(0.5, 2, ZONE_WIDTH), Color.BLACK, true, false)
+
+func _setup_npcs() -> void:
+	npc_targets.clear()
+	npc_night_lights.clear()
+	for candidate in find_children("*", "Node3D", true, false):
+		var existing_npc := candidate as Node3D
+		if existing_npc.scene_file_path.to_lower().contains("character-employee.glb") or existing_npc.name.to_lower().contains("character-employee"):
+			existing_npc.queue_free()
+	var npc_specs := [
+		{"name":"Guardia_01", "position":Vector3(8, 0, 0), "dialogue":"Busca quién publicó el dato y comprueba la fuente original."},
+		{"name":"Guardia_02", "position":Vector3(19, 0, 0), "dialogue":"Revisa la fecha para saber si la información sigue vigente."},
+		{"name":"Guardia_03", "position":Vector3(30, 0, 0), "dialogue":"Compara las cifras con documentos públicos."},
+		{"name":"Guardia_04", "position":Vector3(43, 0, 6), "dialogue":"Pregunta cuántas personas participaron en la encuesta."},
+		{"name":"Guardia_05", "position":Vector3(58, 0, 0), "dialogue":"Cuando reúnas todas las fichas, llévalas a la máquina de tickets."}
+	]
+	var reserved_positions: Array[Vector3] = []
+	for i in range(npc_specs.size()):
+		var spec: Dictionary = npc_specs[i]
+		var npc_name := String(spec.name)
+		var desired_position: Vector3 = spec.position * MAP_SCALE
+		var safe_position := _find_clear_guard_position(desired_position, reserved_positions)
+		if safe_position.x < -900.0:
+			continue
+		reserved_positions.append(safe_position)
+		var npc := _add_model(CHARACTERS + "character-knight.glb", safe_position, Vector3(1.55, 1.55, 1.55), self)
+		if npc == null:
+			continue
+		npc.name = npc_name
+		npc.rotation.y = -PI * 0.5
+		npc.set_meta("npc_dialogue", String(spec.dialogue))
+		_create_npc_night_light(npc)
+		var animations := npc.find_children("*", "AnimationPlayer", true, false)
+		var animator: AnimationPlayer = null
+		if not animations.is_empty():
+			animator = animations[0] as AnimationPlayer
+			var idle_name := ""
+			for animation_name in animator.get_animation_list():
+				if String(animation_name).to_lower().contains("idle"):
+					idle_name = String(animation_name)
+					break
+			if idle_name.is_empty() and not animator.get_animation_list().is_empty():
+				idle_name = animator.get_animation_list()[0]
+			if not idle_name.is_empty():
+				animator.play(idle_name)
+		var mood_bar := _create_npc_mood_bar(npc)
+		npc_targets.append({"node":npc, "position":npc.global_position, "name":npc_name, "mood":1.0, "seconds_left":npc_mood_duration, "recharging":false, "recharge_elapsed":0.0, "animator":animator, "bar":mood_bar, "index":i})
+
+func _find_clear_guard_position(desired: Vector3, reserved_positions: Array[Vector3]) -> Vector3:
+	var space := get_world_3d().direct_space_state
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 0.34
+	capsule.height = 1.8
+	var candidates: Array[Dictionary] = []
+	for x_step in range(-12, 13):
+		for z_step in range(-12, 13):
+			var x := desired.x + float(x_step) * 0.5
+			var z := desired.z + float(z_step) * 0.5
+			_append_clear_guard_candidate(candidates, space, capsule, x, z, desired, reserved_positions)
+	if candidates.is_empty():
+		# If a screenshot waypoint is obstructed, search the complete first-district
+		# walkable area for the nearest free place instead of spawning inside a wall.
+		for x_step in range(3, int(ZONE_LENGTH * MAP_SCALE * 2.0), 2):
+			for z_step in range(-int(ZONE_WIDTH * MAP_SCALE - 6.0), int(ZONE_WIDTH * MAP_SCALE - 6.0) + 1, 2):
+				_append_clear_guard_candidate(candidates, space, capsule, float(x_step) * 0.5, float(z_step) * 0.5, desired, reserved_positions)
+	if candidates.is_empty():
+		push_warning("No encontré suelo despejado para " + str(desired))
+		return Vector3(-1000, -1000, -1000)
+	candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.distance < b.distance)
+	return candidates[0].position
+
+func _append_clear_guard_candidate(candidates: Array[Dictionary], space: PhysicsDirectSpaceState3D, capsule: CapsuleShape3D, x: float, z: float, desired: Vector3, reserved_positions: Array[Vector3]) -> void:
+	if x < 1.5 or x > ZONE_LENGTH * MAP_SCALE - 1.5 or absf(z) > ZONE_WIDTH * MAP_SCALE * 0.5 - 3.5:
+		return
+	var ray := PhysicsRayQueryParameters3D.create(Vector3(x, 5.0, z), Vector3(x, -1.0, z))
+	ray.collision_mask = 1
+	var ground := space.intersect_ray(ray)
+	if ground.is_empty():
+		return
+	var ground_y: float = ground.position.y
+	if ground_y < -0.2 or ground_y > 0.5:
+		return
+	if not _spawn_capsule_is_clear(space, capsule, x, z, ground_y):
+		return
+	var candidate := Vector3(x, ground_y + 0.03, z)
+	for placed in reserved_positions:
+		if Vector2(candidate.x, candidate.z).distance_to(Vector2(placed.x, placed.z)) < 2.5:
+			return
+	candidates.append({"position":candidate, "distance":candidate.distance_squared_to(desired)})
+
+func _create_npc_mood_bar(npc: Node3D) -> Node3D:
+	var bar_root := Node3D.new()
+	bar_root.name = "MoodStatusBar"
+	bar_root.position = npc.global_position + Vector3(0, 2.25, 0)
+	add_child(bar_root)
+	var background := MeshInstance3D.new()
+	background.name = "Background"
+	var background_mesh := BoxMesh.new()
+	background_mesh.size = Vector3(1.45, 0.16, 0.045)
+	background.mesh = background_mesh
+	var background_material := StandardMaterial3D.new()
+	background_material.albedo_color = Color("182131")
+	background_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	background.material_override = background_material
+	bar_root.add_child(background)
+	var fill := MeshInstance3D.new()
+	fill.name = "Fill"
+	var fill_mesh := BoxMesh.new()
+	fill_mesh.size = Vector3(1.32, 0.09, 0.06)
+	fill.mesh = fill_mesh
+	fill.position = Vector3(0, 0, 0.035)
+	var fill_material := StandardMaterial3D.new()
+	fill_material.albedo_color = Color("65e6a5")
+	fill_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fill.material_override = fill_material
+	bar_root.add_child(fill)
+	var label := Label3D.new()
+	label.name = "MoodLabel"
+	label.text = "ÁNIMO · 100%"
+	label.position = Vector3(0, 0.22, 0)
+	label.font_size = 28
+	label.pixel_size = 0.004
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = false
+	bar_root.add_child(label)
+	return bar_root
+
+func _update_npc_moods(delta: float) -> void:
+	for key in bard_cooldowns.keys():
+		bard_cooldowns[key] = maxf(0.0, float(bard_cooldowns[key]) - delta)
+	for i in range(npc_targets.size()):
+		var state: Dictionary = npc_targets[i]
+		var npc := state.node as Node3D
+		if not is_instance_valid(npc):
+			continue
+		if state.recharging:
+			state.recharge_elapsed = minf(float(state.recharge_elapsed) + delta, NPC_MOOD_RECHARGE_DURATION)
+			state.mood = float(state.recharge_elapsed) / NPC_MOOD_RECHARGE_DURATION
+			if float(state.recharge_elapsed) >= NPC_MOOD_RECHARGE_DURATION:
+				state.recharging = false
+				state.seconds_left = npc_mood_duration
+		else:
+			state.seconds_left = maxf(float(state.seconds_left) - delta, 0.0)
+			state.mood = float(state.seconds_left) / npc_mood_duration
+		var bar := state.bar as Node3D
+		if is_instance_valid(bar):
+			bar.global_position = npc.global_position + Vector3(0, 2.25, 0)
+			if camera != null:
+				bar.global_rotation.y = camera.global_rotation.y
+			var fill := bar.get_node_or_null("Fill") as MeshInstance3D
+			if fill:
+				var ratio := clampf(float(state.mood), 0.0, 1.0)
+				fill.scale.x = maxf(ratio, 0.01)
+				fill.position.x = -0.66 * (1.0 - ratio)
+				var material := fill.material_override as StandardMaterial3D
+				if material:
+					material.albedo_color = Color("65e6a5").lerp(Color("ff6b76"), 1.0 - ratio)
+			var label := bar.get_node_or_null("MoodLabel") as Label3D
+			if label:
+				label.text = "ÁNIMO · %d%%" % roundi(float(state.mood) * 100.0)
+		npc_targets[i] = state
+
+func _update_npc_facing(delta: float) -> void:
+	if player == null:
+		return
+	for state in npc_targets:
+		var npc := state.node as Node3D
+		if not is_instance_valid(npc):
+			continue
+		var direction := player.global_position - npc.global_position
+		direction.y = 0.0
+		if direction.length_squared() > 0.01 and direction.length() <= 12.0:
+			# The Kenney knight models face local +Z, opposite Godot's usual -Z forward.
+			var target_yaw := atan2(direction.x, direction.z)
+			npc.global_rotation.y = lerp_angle(npc.global_rotation.y, target_yaw, minf(delta * 5.0, 1.0))
+
+func _cheer_npc(npc_index: int, strength: float = 1.0) -> void:
+	if npc_index < 0 or npc_index >= npc_targets.size():
+		return
+	var state: Dictionary = npc_targets[npc_index]
+	if strength < 1.0:
+		if float(bard_cooldowns.get(npc_index, 0.0)) > 0.0:
+			return
+		state.mood = minf(1.0, float(state.mood) + strength)
+		state.seconds_left = float(state.mood) * npc_mood_duration
+		state.recharging = false
+		bard_cooldowns[npc_index] = NPC_MOOD_RECHARGE_DURATION
+	else:
+		if state.recharging:
+			return
+		state.recharging = true
+		state.recharge_elapsed = 0.0
+		cheered_npcs[npc_index] = true
+	var npc := state.node as Node3D
+	var animator := state.animator as AnimationPlayer
+	var played_cheer := false
+	if is_instance_valid(animator):
+		for animation_name in animator.get_animation_list():
+			var animation_key := String(animation_name).to_lower()
+			if animation_key.contains("cheer") or animation_key.contains("happy") or animation_key.contains("wave") or animation_key.contains("dance"):
+				animator.play(String(animation_name))
+				played_cheer = true
+				break
+	if is_instance_valid(npc) and not played_cheer:
+		var tween := create_tween()
+		tween.set_loops(3)
+		tween.tween_property(npc, "position:y", float(npc.position.y) + 0.3, 0.18)
+		tween.tween_property(npc, "position:y", float(npc.position.y), 0.18)
+	npc_targets[npc_index] = state
+	_update_information_hud()
+	_broadcast_coop_state()
+
+func _discover_information_chests() -> void:
+	info_chests.clear()
+	chest_lights.clear()
+	var progress := ConfigFile.new()
+	progress.load(CHEST_PROGRESS_PATH)
+	var opened_chests: Array = progress.get_value("progress", "opened_chests", [])
+	var candidates := find_children("*", "Node3D", true, false)
+	for candidate in candidates:
+		var chest := candidate as Node3D
+		var path_is_chest := chest.scene_file_path.to_lower().contains("chest.glb")
+		var named_chest := chest.name.to_lower().begins_with("chest") and not chest.find_children("*", "MeshInstance3D", true, false).is_empty()
+		var has_chest_ancestor := false
+		var ancestor := chest.get_parent()
+		while ancestor:
+			if ancestor is Node3D and (ancestor as Node3D).scene_file_path.to_lower().contains("chest.glb"):
+				has_chest_ancestor = true
+				break
+			ancestor = ancestor.get_parent()
+		if chest.get_meta("trap_chest", false):
+			_setup_chest_glow(chest)
+		elif (path_is_chest or (named_chest and not has_chest_ancestor)) and not has_chest_ancestor:
+			if opened_chests.has(_chest_id(chest)):
+				info_chests.append({"node":chest, "position":chest.global_position, "name":String(chest.name)})
+				_setup_chest_glow(chest)
+			else:
+				chest.queue_free()
+	info_chests.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.position.x < b.position.x)
+
+func _chest_id(chest: Node3D) -> String:
+	return String(chest.get_path())
+
+func _setup_chest_glow(chest: Node3D) -> void:
+	var bounds := _world_visual_bounds(chest)
+	# Place the invisible light just above the lid; the anchor has no rendered mesh.
+	var chest_top := Vector3(bounds.get_center().x, bounds.end.y + maxf(0.08, bounds.size.y * 0.025), bounds.get_center().z)
+	var glow := _add_embedded_glow(chest, chest_top, Color("f2d276"), maxf(18.0, bounds.size.length() * 1.5), 0.3)
+	chest_lights.append(glow)
+
+func _save_opened_chest(index: int) -> void:
+	var save := ConfigFile.new()
+	save.load(CHEST_PROGRESS_PATH)
+	var opened: Array = save.get_value("progress", "opened_chests", [])
+	var chest := info_chests[index].node as Node3D
+	var chest_id := _chest_id(chest)
+	if not opened.has(chest_id):
+		opened.append(chest_id)
+	save.set_value("progress", "opened_chests", opened)
+	save.save(CHEST_PROGRESS_PATH)
+
+func _find_ticket_machine() -> void:
+	var candidates := find_children("*", "Node3D", true, false)
+	for candidate in candidates:
+		var node := candidate as Node3D
+		if node.scene_file_path.to_lower().contains("ticket-machine.glb") or node.name.to_lower().contains("ticket-machine"):
+			ticket_machine_position = node.global_position
+			return
+	if not stations.is_empty():
+		ticket_machine_position = stations[0].position
+
+func _find_roulette() -> void:
+	roulette_node = get_node_or_null("prize-wheel2") as Node3D
+	if roulette_node == null:
+		for candidate in find_children("*", "Node3D", true, false):
+			var node := candidate as Node3D
+			if node.scene_file_path.to_lower().contains("prize-wheel.glb") or node.name.to_lower().contains("prize-wheel"):
+				roulette_node = node
+				break
+	if is_instance_valid(roulette_node):
+		var wheel_bounds := _world_visual_bounds(roulette_node)
+		roulette_position = wheel_bounds.get_center()
+		roulette_interaction_range = maxf(6.0, wheel_bounds.size.length() * 0.35)
+		_enable_roulette_emission(roulette_node)
+		_add_world_glow(roulette_position, Color("55ddff"), maxf(10.0, wheel_bounds.size.length() * 0.8), 3.2)
+		return
+	if stations.size() > 1:
+		roulette_position = stations[1].position * MAP_SCALE + Vector3(0, 3.0, 0)
+		_add_world_glow(roulette_position, Color("55ddff"), 10.0, 3.2)
+
+func _world_visual_bounds(root: Node3D) -> AABB:
+	var found := false
+	var min_corner := Vector3.ZERO
+	var max_corner := Vector3.ZERO
+	var mesh_candidates := root.find_children("*", "MeshInstance3D", true, false)
+	if root is MeshInstance3D:
+		mesh_candidates.append(root)
+	for candidate in mesh_candidates:
+		var mesh_instance := candidate as MeshInstance3D
+		if mesh_instance.mesh == null:
+			continue
+		var local_bounds := mesh_instance.get_aabb()
+		for x in [local_bounds.position.x, local_bounds.end.x]:
+			for y in [local_bounds.position.y, local_bounds.end.y]:
+				for z in [local_bounds.position.z, local_bounds.end.z]:
+					var corner := mesh_instance.global_transform * Vector3(x, y, z)
+					if not found:
+						min_corner = corner
+						max_corner = corner
+						found = true
+					else:
+						min_corner = min_corner.min(corner)
+						max_corner = max_corner.max(corner)
+	if not found:
+		return AABB(root.global_position, Vector3.ZERO)
+	return AABB(min_corner, max_corner - min_corner)
+
+func _enable_roulette_emission(root: Node3D) -> void:
+	for candidate in root.find_children("*", "MeshInstance3D", true, false):
+		var mesh_instance := candidate as MeshInstance3D
+		if mesh_instance.mesh == null:
+			continue
+		for surface in range(mesh_instance.mesh.get_surface_count()):
+			var source := mesh_instance.get_active_material(surface)
+			if not source is StandardMaterial3D:
+				continue
+			var glowing_material := (source as StandardMaterial3D).duplicate() as StandardMaterial3D
+			glowing_material.emission_enabled = true
+			if glowing_material.albedo_texture != null:
+				glowing_material.emission_texture = glowing_material.albedo_texture
+				glowing_material.emission = Color("b4f2ff")
+			else:
+				glowing_material.emission = glowing_material.albedo_color.lerp(Color("55ddff"), 0.25)
+			glowing_material.emission_energy_multiplier = 0.38
+			mesh_instance.set_surface_override_material(surface, glowing_material)
+
+func _add_world_glow(at: Vector3, tint: Color, radius: float, brightness: float) -> OmniLight3D:
+	var glow := OmniLight3D.new()
+	glow.light_color = tint
+	glow.light_energy = brightness
+	glow.omni_range = radius
+	glow.omni_attenuation = 0.22
+	glow.light_cull_mask = 0xffffffff
+	glow.distance_fade_enabled = false
+	glow.shadow_enabled = false
+	# This is a world-space lamp; its state never depends on camera direction.
+	glow.visible = true
+	add_child(glow)
+	glow.global_position = at
+	return glow
+
+func _add_embedded_glow(owner: Node3D, at_global: Vector3, tint: Color, radius: float, attenuation: float) -> OmniLight3D:
+	# A Node3D has no rendered geometry: this invisible anchor stays inside its
+	# owner, while the OmniLight child emits in every direction when enabled.
+	var invisible_orb := Node3D.new()
+	invisible_orb.name = "InvisibleGlowOrb"
+	owner.add_child(invisible_orb)
+	invisible_orb.position = owner.to_local(at_global)
+	var glow := OmniLight3D.new()
+	glow.name = "EmbeddedOmniLight"
+	glow.light_color = tint
+	glow.light_energy = 0.0
+	glow.omni_range = radius
+	glow.omni_attenuation = attenuation
+	glow.light_cull_mask = 0xffffffff
+	glow.distance_fade_enabled = false
+	glow.shadow_enabled = false
+	glow.visible = false
+	invisible_orb.add_child(glow)
+	return glow
+
+func _create_npc_night_light(npc: Node3D) -> void:
+	var npc_bounds := _world_visual_bounds(npc)
+	# Keep the invisible blue light close above the head; the anchor follows the NPC.
+	var head_top := Vector3(npc_bounds.get_center().x, npc_bounds.end.y + maxf(0.08, npc_bounds.size.y * 0.025), npc_bounds.get_center().z)
+	var glow := _add_embedded_glow(npc, head_top, Color("83aaff"), 24.0, 0.28)
+	npc_night_lights.append(glow)
+
+func _setup_fireflies() -> void:
+	firefly_lights.clear()
+	firefly_orbs.clear()
+	firefly_nodes.clear()
+	var positions: Array[Vector3] = []
+	var positions_with_light: Array[bool] = []
+	# A few scattered lights keep the paths readable while the clusters make the
+	# dark corners feel intentional instead of evenly dotted across the floor.
+	for index in range(15):
+		var x := 8.0 + float(index) * ((WORLD_LENGTH * MAP_SCALE - 16.0) / 14.0)
+		var z := -8.0 if index % 2 == 0 else 8.0
+		var y := 2.2 + float((index * 7) % 16) * 0.24
+		positions.append(Vector3(x, y, z))
+		positions_with_light.append(index % 3 == 0)
+
+	for zone in range(3):
+		for side_index in range(2):
+			var side := -1.0 if side_index == 0 else 1.0
+			var center_x := (float(zone) * ZONE_LENGTH + (17.0 if side_index == 0 else 54.0)) * MAP_SCALE
+			for point_index in range(4):
+				var angle := TAU * float(point_index) / 4.0 + float(zone) * 0.6
+				var radius := 1.4 + float(point_index % 2) * 0.55
+				var height := 2.0 + float(point_index) * 1.45
+				positions.append(Vector3(center_x + cos(angle) * radius, height, side * (12.0 + sin(angle) * radius)))
+				positions_with_light.append(point_index == 0)
+
+	var tree_roots: Array[Node3D] = []
+	for candidate in find_children("*", "Node3D", true, false):
+		var tree_root := candidate as Node3D
+		if tree_root.scene_file_path.to_lower().contains("tree.glb"):
+			tree_roots.append(tree_root)
+		elif tree_root is MeshInstance3D and tree_root.name.to_lower().contains("tree") and (tree_root as MeshInstance3D).mesh != null and not _has_tree_scene_ancestor(tree_root):
+			tree_roots.append(tree_root)
+	tree_roots.sort_custom(func(a: Node3D, b: Node3D) -> bool: return a.global_position.x < b.global_position.x)
+	for tree_index in range(tree_roots.size()):
+		var tree := tree_roots[tree_index]
+		var bounds := _world_visual_bounds(tree)
+		var tree_center := bounds.get_center()
+		if bounds.size.length() < 0.1:
+			continue
+		var tree_height := bounds.size.y
+		var firefly_count := 5
+		if tree_height >= 4.0:
+			firefly_count = 8
+		if tree_height >= 7.0:
+			firefly_count = 12
+		var nearby_trees := 0
+		for other_index in range(tree_roots.size()):
+			if other_index == tree_index:
+				continue
+			var other_bounds := _world_visual_bounds(tree_roots[other_index])
+			var dx := bounds.get_center().x - other_bounds.get_center().x
+			var dz := bounds.get_center().z - other_bounds.get_center().z
+			var spacing := sqrt(dx * dx + dz * dz)
+			var touch_distance := maxf(4.5, (maxf(bounds.size.x, bounds.size.z) + maxf(other_bounds.size.x, other_bounds.size.z)) * 0.3)
+			if spacing < touch_distance:
+				nearby_trees += 1
+		if nearby_trees > 0:
+			firefly_count = maxi(3, int(round(float(firefly_count) / (1.0 + float(nearby_trees) * 0.5))))
+		var radius := maxf(1.0, maxf(bounds.size.x, bounds.size.z) * 0.38)
+		for point_index in range(firefly_count):
+			var angle := TAU * float(point_index) / float(firefly_count) + float(tree_index) * 0.41
+			# Rotate through low, middle, and high points around the tree.
+			var level := point_index % 3
+			var height_fraction: float = [0.18, 0.53, 0.88][level]
+			var height := lerpf(bounds.position.y + 0.25, bounds.end.y - 0.25, height_fraction)
+			positions.append(Vector3(tree_center.x + cos(angle) * radius, height, tree_center.z + sin(angle) * radius))
+			positions_with_light.append(point_index == 0 or (tree_height >= 7.0 and point_index == firefly_count / 2))
+
+	for index in range(positions.size()):
+		_create_firefly(index, positions[index], positions_with_light[index])
+
+func _has_tree_scene_ancestor(node: Node) -> bool:
+	var ancestor := node.get_parent()
+	while ancestor != null:
+		if ancestor.scene_file_path.to_lower().contains("tree.glb"):
+			return true
+		ancestor = ancestor.get_parent()
+	return false
+
+func _create_firefly(index: int, base_position: Vector3, make_light: bool) -> void:
+	var firefly := Node3D.new()
+	firefly.name = "Firefly_%02d" % index
+	add_child(firefly)
+	firefly.global_position = base_position
+	firefly.set_meta("base_position", base_position)
+	firefly.set_meta("phase_offset", float(index) * 0.73)
+
+	var orb := MeshInstance3D.new()
+	orb.name = "FireflyOrb"
+	var orb_mesh := SphereMesh.new()
+	orb_mesh.radius = 0.095
+	orb_mesh.height = 0.19
+	orb.mesh = orb_mesh
+	var orb_material := StandardMaterial3D.new()
+	orb_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	orb_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	orb_material.albedo_color = Color("d9ff9c", 0.0)
+	orb_material.emission_enabled = true
+	orb_material.emission = Color("caff82")
+	orb_material.emission_energy_multiplier = 0.0
+	orb.material_override = orb_material
+	orb.visible = false
+	firefly.add_child(orb)
+	firefly_orbs.append(orb)
+	firefly_nodes.append(firefly)
+
+	if make_light:
+		var glow := OmniLight3D.new()
+		glow.name = "FireflyGlow"
+		glow.light_color = Color("caff91")
+		glow.light_energy = 0.0
+		glow.omni_range = 5.5
+		glow.shadow_enabled = false
+		firefly.add_child(glow)
+		firefly_lights.append(glow)
+
+func _animate_fireflies(delta: float) -> void:
+	firefly_time += delta
+	for index in range(firefly_nodes.size()):
+		var firefly := firefly_nodes[index]
+		if not is_instance_valid(firefly):
+			continue
+		var base_position: Vector3 = firefly.get_meta("base_position", firefly.position)
+		var offset := float(firefly.get_meta("phase_offset", 0.0))
+		firefly.position = base_position + Vector3(sin(firefly_time * 0.8 + offset) * 0.32, sin(firefly_time * 1.7 + offset) * 0.22, cos(firefly_time * 0.65 + offset) * 0.28)
+		var night_amount := 0.0
+		if day_sky != null:
+			night_amount = float(day_sky.get_shader_parameter("night_amount"))
+		var visibility := smoothstep(0.015, 0.72, night_amount)
+		var flutter := 0.88 + 0.12 * (0.5 + 0.5 * sin(firefly_time * 2.0 + offset))
+		var glow := firefly.get_node_or_null("FireflyGlow") as OmniLight3D
+		if glow != null:
+			glow.visible = lights_enabled and night_amount > 0.005
+			glow.light_energy = night_amount * 0.22 * flutter if lights_enabled else 0.0
+		if index < firefly_orbs.size() and is_instance_valid(firefly_orbs[index]):
+			var orb := firefly_orbs[index]
+			orb.visible = lights_enabled and night_amount > 0.005
+			var orb_material := orb.material_override as StandardMaterial3D
+			if orb_material != null:
+				orb_material.albedo_color.a = visibility if lights_enabled else 0.0
+				orb_material.emission_energy_multiplier = night_amount * 1.2 if lights_enabled else 0.0
+
+func _setup_day_night_cycle() -> void:
+	var lights := find_children("*", "DirectionalLight3D", true, false)
+	if not lights.is_empty():
+		sun_light = lights[0] as DirectionalLight3D
+	var environments := find_children("*", "WorldEnvironment", true, false)
+	if not environments.is_empty():
+		day_environment = (environments[0] as WorldEnvironment).environment
+		if day_environment != null:
+			# Apply this to the saved scene's environment too; the editor-built scene
+			# can have an Environment resource that predates the runtime glow setup.
+			day_environment.glow_enabled = true
+			day_environment.glow_intensity = 0.65
+			day_environment.glow_bloom = 0.08
+			if day_environment.sky != null:
+				day_sky = ShaderMaterial.new()
+				day_sky.shader = load("res://scripts/dynamic_sky.gdshader")
+				day_sky.set_shader_parameter("zenith_color", Vector3(0.09, 0.15, 0.25))
+				day_sky.set_shader_parameter("horizon_color", Vector3(0.45, 0.56, 0.67))
+				day_sky.set_shader_parameter("ground_color", Vector3(0.08, 0.10, 0.17))
+				day_environment.sky.sky_material = day_sky
+	day_phase_presets = [
+		{"sun_x":-48.0, "energy":0.24, "ambient":0.20, "ambient_color":Color("8296b2"), "top":Color("172541"), "horizon":Color("728eaa"), "ground_bottom":Color("12182b"), "ground_horizon":Color("546178"), "night":0.0},
+		{"sun_x":-8.0, "energy":0.16, "ambient":0.15, "ambient_color":Color("d39683"), "top":Color("413858"), "horizon":Color("e49a73"), "ground_bottom":Color("211a32"), "ground_horizon":Color("72516a"), "night":0.0},
+		{"sun_x":18.0, "energy":0.025, "ambient":0.055, "ambient_color":Color("526080"), "top":Color("070d20"), "horizon":Color("17213a"), "ground_bottom":Color("050916"), "ground_horizon":Color("10182b"), "night":1.0}
+	]
+	day_cycle_elapsed = 0.0
+	_apply_day_phase(day_phase_presets[0], day_phase_presets[0], 0.0)
+
+func _update_day_night_cycle(delta: float) -> void:
+	if day_phase_presets.size() < 3:
+		return
+	day_cycle_elapsed = fposmod(day_cycle_elapsed + delta, DAY_PHASE_DURATION * 3.0)
+	var phase_index := int(day_cycle_elapsed / DAY_PHASE_DURATION)
+	var next_index := (phase_index + 1) % day_phase_presets.size()
+	var phase_progress := fposmod(day_cycle_elapsed, DAY_PHASE_DURATION) / DAY_PHASE_DURATION
+	_apply_day_phase(day_phase_presets[phase_index], day_phase_presets[next_index], phase_progress)
+
+func _apply_day_phase(from_phase: Dictionary, to_phase: Dictionary, progress: float) -> void:
+	if is_instance_valid(sun_light):
+		sun_light.rotation_degrees.x = lerpf(float(from_phase.sun_x), float(to_phase.sun_x), progress)
+		sun_light.light_energy = lerpf(float(from_phase.energy), float(to_phase.energy), progress)
+	if day_environment != null:
+		day_environment.ambient_light_energy = lerpf(float(from_phase.ambient), float(to_phase.ambient), progress)
+		day_environment.ambient_light_color = from_phase.ambient_color.lerp(to_phase.ambient_color, progress)
+	if day_sky != null:
+		var zenith: Color = from_phase.top.lerp(to_phase.top, progress)
+		var horizon: Color = from_phase.horizon.lerp(to_phase.horizon, progress)
+		var ground: Color = from_phase.ground_bottom.lerp(to_phase.ground_bottom, progress)
+		day_sky.set_shader_parameter("zenith_color", Vector3(zenith.r, zenith.g, zenith.b))
+		day_sky.set_shader_parameter("horizon_color", Vector3(horizon.r, horizon.g, horizon.b))
+		day_sky.set_shader_parameter("ground_color", Vector3(ground.r, ground.g, ground.b))
+		day_sky.set_shader_parameter("night_amount", lerpf(float(from_phase.night), float(to_phase.night), progress))
+	# Reuse the exact night ramp used by fireflies. Guard and chest lights stay
+	# completely off until fireflies begin appearing, then fade out with them.
+	var night_amount := 0.0
+	if day_sky != null:
+		night_amount = float(day_sky.get_shader_parameter("night_amount"))
+	var lights_active := lights_enabled and night_amount > 0.005
+	var light_flutter := 0.88 + 0.12 * (0.5 + 0.5 * sin(firefly_time * 2.0))
+	var shared_light_energy := night_amount * 0.26 * light_flutter
+	for glow in npc_night_lights:
+		if is_instance_valid(glow):
+			glow.visible = lights_active
+			glow.light_energy = shared_light_energy
+	for glow in chest_lights:
+		if is_instance_valid(glow):
+			glow.visible = lights_active
+			glow.light_energy = shared_light_energy
+
+func _build_continuous_zone(zone: int, start_x: float) -> void:
+	var floor_path: String = [DUNGEON + "floor.glb", ARENA + "floor.glb", ARCADE + "floor.glb"][zone]
+	var detail_path: String = [DUNGEON + "floor-detail.glb", ARENA + "floor-detail.glb", DUNGEON + "stones.glb"][zone]
+	var floor_color: Color = [Color("786b68"), Color("c99b79"), Color("64657e")][zone]
+	var zone_center := start_x + ZONE_LENGTH * 0.5
+	# Three 72 m districts touch directly; each has its own detailed, traversable layout.
+	if zone == 0:
+		_add_box("DungeonFloorWest", Vector3(start_x + 23, -0.3, 0), Vector3(46, 0.6, ZONE_WIDTH), floor_color, true, false)
+		_add_box("DungeonFloorEast", Vector3(start_x + 62, -0.3, 0), Vector3(20, 0.6, ZONE_WIDTH), floor_color, true, false)
+	else:
+		_add_box("ZoneFloor%d" % zone, Vector3(zone_center, -0.3, 0), Vector3(ZONE_LENGTH, 0.6, ZONE_WIDTH), floor_color, true, false)
+	for ix in range(36):
+		for iz in range(15):
+			var tile_pos := Vector3(start_x + 1 + ix * 2, 0.015, -14 + iz * 2)
+			# The first district has a real six-metre canal, crossed by its timber bridge.
+			if zone == 0 and tile_pos.x >= start_x + 47 and tile_pos.x <= start_x + 53:
+				continue
+			_add_model(floor_path, tile_pos, Vector3(2, 1, 2), self)
+			if (ix * 17 + iz * 11 + zone * 7) % 43 == 0:
+				_add_model(detail_path, tile_pos + Vector3(0, 0.03, 0), Vector3(1.1, 1.1, 1.1), self)
+	# Stone/ruin perimeter is built from the supplied wall tiles and has mesh collision.
+	var border_path: String = [DUNGEON + "wall-half.glb", ARENA + "border-straight.glb", ARCADE + "wall.glb"][zone]
+	for i in range(36):
+		var border_x := start_x + 1 + i * 2
+		_add_model(border_path, Vector3(border_x, 0, -14), Vector3(2, 2, 2), self, true)
+		_add_model(border_path, Vector3(border_x, 0, 14), Vector3(2, 2, 2), self, true)
+	match zone:
+		0: _build_dungeon_layout(start_x)
+		1: _build_arena_maze(start_x)
+		2: _build_arcade_hall(start_x)
+
+func _build_dungeon_layout(start_x: float) -> void:
+	# Broken stone walls form a winding path; the intentional gaps are doorways.
+	_add_wall_run_x(DUNGEON + "wall.glb", start_x + 5, 8, 9, 2.0, 1.8, [5])
+	_add_wall_run_x(DUNGEON + "wall.glb", start_x + 12, -6, 12, 2.0, 1.8, [4, 9])
+	_add_wall_run_x(DUNGEON + "wall-half.glb", start_x + 30, 6, 12, 2.0, 2.0, [2, 8])
+	_add_wall_run_z(DUNGEON + "wall.glb", start_x + 37, -12, 13, 2.0, 1.8, [4, 5, 10])
+	_add_wall_run_z(DUNGEON + "wall.glb", start_x + 56, -12, 13, 2.0, 1.8, [2, 3, 9])
+	_add_wall_run_z(DUNGEON + "wall-half.glb", start_x + 23, -4, 7, 2.0, 1.8, [2, 3])
+	_add_model(DUNGEON + "wall-opening.glb", Vector3(start_x + 37, 0, -2), Vector3(2, 2, 2), self, true, PI * 0.5)
+	# The canal is a visible gap in both tile floor and floor collision; the bridge is the crossing.
+	_add_box("DungeonCanal", Vector3(start_x + 50, -0.31, 0), Vector3(7.8, 0.06, 27), Color("274f70"), false)
+	_add_box("TimberBridgeDeck", Vector3(start_x + 50, 0.26, 0), Vector3(8.2, 0.5, 4.4), Color("936044"), true)
+	for plank in range(4):
+		_add_model(DUNGEON + "wood-structure.glb", Vector3(start_x + 47 + plank * 2, 0.52, 0), Vector3(2, 1, 4), self, true)
+	for post_x in [start_x + 47, start_x + 53]:
+		for post_z in [-2.4, 2.4]:
+			_add_model(DUNGEON + "wood-support.glb", Vector3(post_x, 0.45, post_z), Vector3(2.4, 2.4, 2.4), self, true)
+	# Climbable staircases have a matching sloped collider so the player can walk up them.
+	_add_stairway(DUNGEON + "stairs.glb", Vector3(start_x + 8, 0, 8), Vector3(2.8, 2.8, 2.8), 2.8, 2.5)
+	_add_box("DungeonRaisedLanding", Vector3(start_x + 11.5, 2.5, 8), Vector3(4.4, 0.3, 3.0), Color("817b91"), true)
+	_add_stairway(DUNGEON + "stairs.glb", Vector3(start_x + 61, 0, -9), Vector3(2.8, 2.8, 2.8), 2.8, 2.5)
+	_add_box("DungeonExitLanding", Vector3(start_x + 64.5, 2.5, -9), Vector3(4.4, 0.3, 3.0), Color("817b91"), true)
+	# A lived-in dungeon workshop, all with solid geometry collision.
+	_add_model(DUNGEON + "wood-structure.glb", Vector3(start_x + 20, 0, 10), Vector3(3.4, 3.4, 3.4), self, true)
+	_add_model(DUNGEON + "table.glb", Vector3(start_x + 7, 0, 10), Vector3(2.4, 2.4, 2.4), self, true)
+	_add_model(DUNGEON + "chair.glb", Vector3(start_x + 5, 0, 10), Vector3(2.4, 2.4, 2.4), self, true)
+	_add_model(DUNGEON + "barrel.glb", Vector3(start_x + 13, 0, 10), Vector3(2.5, 2.5, 2.5), self, true)
+	_add_model(DUNGEON + "rocks.glb", Vector3(start_x + 32, 0, 10), Vector3(3.2, 3.2, 3.2), self, true)
+	_add_model(DUNGEON + "column.glb", Vector3(start_x + 43, 0, 10), Vector3(3, 3, 3), self, true)
+	var trap_chest := _add_model(DUNGEON + "chest.glb", Vector3(start_x + 62, 0, 8), Vector3(2.5, 2.5, 2.5), self, true)
+	if trap_chest != null:
+		trap_chest.set_meta("trap_chest", true)
+	_add_model(DUNGEON + "pot.glb", Vector3(start_x + 59, 0, 8), Vector3(2, 2, 2), self, true)
+	_add_model(DUNGEON + "gate.glb", Vector3(start_x + 41, 0, -11), Vector3(3, 3, 3), self, true)
+
+func _build_arena_maze(start_x: float) -> void:
+	# A broad maze with planned openings, gates and readable loops rather than scattered blocks.
+	_add_wall_run_x(ARENA + "wall.glb", start_x + 9, -8, 20, 1.8, 1.8, [3, 4, 14, 15], ARENA + "wall-gate.glb")
+	_add_wall_run_x(ARENA + "wall.glb", start_x + 25, 8, 19, 1.8, 1.8, [5, 6, 13], ARENA + "wall-gate.glb")
+	_add_wall_run_x(ARENA + "wall.glb", start_x + 49, -2, 11, 1.8, 1.8, [2, 8], ARENA + "wall-gate.glb")
+	_add_wall_run_z(ARENA + "wall.glb", start_x + 26, -12, 13, 1.8, 1.8, [4, 5, 10], ARENA + "wall-gate.glb")
+	_add_wall_run_z(ARENA + "wall.glb", start_x + 47, -12, 13, 1.8, 1.8, [2, 3, 8, 9], ARENA + "wall-gate.glb")
+	_add_wall_run_z(ARENA + "wall.glb", start_x + 64, -12, 13, 1.8, 1.8, [5, 6], ARENA + "wall-gate.glb")
+	# Guard towers, statues, banners and columns mark the turns in the labyrinth.
+	for x in [start_x + 7, start_x + 36, start_x + 66]:
+		_add_model(ARENA + "column.glb", Vector3(x, 0, -11), Vector3(2.8, 2.8, 2.8), self, true)
+		_add_model(ARENA + "column.glb", Vector3(x, 0, 11), Vector3(2.8, 2.8, 2.8), self, true)
+	_add_model(ARENA + "statue.glb", Vector3(start_x + 39, 0, 3), Vector3(2.6, 2.6, 2.6), self, true)
+	_add_model(ARENA + "banner.glb", Vector3(start_x + 19, 0, 11), Vector3(2.8, 2.8, 2.8), self, true)
+	_add_model(ARENA + "tree.glb", Vector3(start_x + 58, 0, 10), Vector3(2.5, 2.5, 2.5), self, true)
+	_add_model(ARENA + "block.glb", Vector3(start_x + 10, 0, 10), Vector3(2.8, 2.8, 2.8), self, true)
+	_add_model(ARENA + "block.glb", Vector3(start_x + 59, 0, -10), Vector3(2.8, 2.8, 2.8), self, true)
+	# Ascending arena stairs and raised platforms have climbable ramps and solid tops.
+	_add_stairway(ARENA + "stairs.glb", Vector3(start_x + 56, 0, 4), Vector3(3.4, 3.4, 3.4), 2.4, 1.7)
+	_add_model(ARENA + "block.glb", Vector3(start_x + 61, 0, 4), Vector3(6, 3.4, 4), self, true)
+
+func _build_arcade_hall(start_x: float) -> void:
+	# The final area is a continuous arcade hall with two machine rows and a clear central aisle.
+	_add_wall_run_x(ARCADE + "wall.glb", start_x + 1, -12.8, 36, 2.0, 2.0)
+	_add_wall_run_x(ARCADE + "wall.glb", start_x + 1, 12.8, 36, 2.0, 2.0)
+	var machine_paths := ["arcade-machine.glb", "pinball.glb", "vending-machine.glb", "basketball-game.glb", "claw-machine.glb", "dance-machine.glb"]
+	for i in range(7):
+		var x := start_x + 7 + i * 9.0
+		var machine: String = ARCADE + machine_paths[i % machine_paths.size()]
+		_add_model(machine, Vector3(x, 0, -8), Vector3(2.7, 2.7, 2.7), self, true)
+		_add_model(machine, Vector3(x, 0, 8), Vector3(2.7, 2.7, 2.7), self, true, PI)
+	_add_model(ARCADE + "air-hockey.glb", Vector3(start_x + 28, 0, 0), Vector3(2.8, 2.8, 2.8), self, true)
+	_add_model(ARCADE + "basketball-game.glb", Vector3(start_x + 44, 0, 0), Vector3(2.5, 2.5, 2.5), self, true)
+	_add_model(ARCADE + "dance-machine.glb", Vector3(start_x + 57, 0, 0), Vector3(2.5, 2.5, 2.5), self, true)
+	_add_stairway(ARENA + "stairs.glb", Vector3(start_x + 17, 0, 2), Vector3(3.4, 3.4, 3.4), 3.4, 1.7)
+	_add_model(ARCADE + "wall-door-rotate.glb", Vector3(start_x + 36, 0, -12.8), Vector3(2, 2, 2), self, true)
+
+func _add_wall_run_x(path: String, start_x: float, z: float, count: int, spacing: float, scale: float, openings: Array = [], gate_path := "") -> void:
+	for i in range(count):
+		var at := Vector3(start_x + i * spacing, 0, z)
+		if openings.has(i):
+			if not gate_path.is_empty():
+				_add_model(gate_path, at, Vector3(scale, scale, scale), self, true)
+			continue
+		_add_model(path, at, Vector3(scale, scale, scale), self, true)
+
+func _add_wall_run_z(path: String, x: float, start_z: float, count: int, spacing: float, scale: float, openings: Array = [], gate_path := "") -> void:
+	for i in range(count):
+		var at := Vector3(x, 0, start_z + i * spacing)
+		if openings.has(i):
+			if not gate_path.is_empty():
+				_add_model(gate_path, at, Vector3(scale, scale, scale), self, true, PI * 0.5)
+			continue
+		_add_model(path, at, Vector3(scale, scale, scale), self, true, PI * 0.5)
+
+func _add_stairway(path: String, at: Vector3, model_scale: Vector3, ramp_length: float, ramp_rise: float) -> void:
+	# Kenney stair meshes rise toward local -Z; rotate them so the ramp climbs east along the route.
+	var stairs := _add_model(path, at, model_scale, self, false, -PI * 0.5)
+	if stairs != null:
+		stairs.set_meta("stair_ramp_length", ramp_length)
+		stairs.set_meta("stair_ramp_rise", ramp_rise)
+
+func _build_player() -> void:
+	player = CharacterBody3D.new()
+	player.name = "Player"
+	player.set_script(load("res://scripts/player.gd"))
+	player.collision_layer = 1
+	player.collision_mask = 1
+	# Pick an unobstructed tile at the entrance so the avatar never starts trapped.
+	var safe_start := _find_safe_spawn()
+	player.last_safe_position = safe_start
+	# A short, visible drop creates a clear arrival moment without keeping the
+	# player waiting through a long fall before controls become available.
+	player.position = safe_start + Vector3(0, 10, 0)
+	player.rotation.y = -PI * 0.5
+	player.controls_enabled = true
+	var collider := CollisionShape3D.new()
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 0.28
+	capsule.height = 1.2
+	collider.shape = capsule
+	collider.position.y = 0.6
+	player.add_child(collider)
+	var model: Node3D = load(PLAYER_SCENE).instantiate()
+	model.name = "AnimatedCitizen"
+	model.position.y = 0.05
+	model.scale = Vector3(0.85, 0.85, 0.85)
+	model.visible = true
+	player.add_child(model)
+	add_child(player)
+
+func _find_safe_spawn() -> Vector3:
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 0.28
+	capsule.height = 1.2
+	var space := get_world_3d().direct_space_state
+	var clear_candidates: Array[Vector3] = []
+	# Check the whole entrance aisle at half-metre spacing. The old coarse scan
+	# could miss a narrow clear spot and then fall back inside a blocking collider.
+	for x_step in range(4, 141, 2):
+		var x := float(x_step) * 0.5
+		for z_step in range(-24, 25, 2):
+			var z := float(z_step) * 0.5
+			var ray := PhysicsRayQueryParameters3D.create(Vector3(x, 4.0, z), Vector3(x, -1.0, z))
+			ray.collision_mask = 1
+			var ground := space.intersect_ray(ray)
+			if ground.is_empty():
+				continue
+			var ground_y: float = ground.position.y
+			if ground_y < -0.2 or ground_y > 0.4:
+				continue
+			if not _spawn_capsule_is_clear(space, capsule, x, z, ground_y):
+				continue
+			var candidate := Vector3(x, ground_y + 0.08, z)
+			clear_candidates.append(candidate)
+			if _spawn_route_is_clear(space, capsule, x, z, ground_y):
+				return candidate
+	# Never use a hard-coded point that might be occupied in a user-edited map.
+	# If all forward lanes are narrow, spawn at the nearest verified clear cell.
+	if not clear_candidates.is_empty():
+		clear_candidates.sort_custom(func(a: Vector3, b: Vector3) -> bool:
+			return a.distance_squared_to(Vector3(2.0, 0.0, 0.0)) < b.distance_squared_to(Vector3(2.0, 0.0, 0.0))
+		)
+		return clear_candidates[0]
+	push_warning("No encontré una celda libre para el spawn; revisa las colisiones del área inicial.")
+	return Vector3(2, 0.08, 0)
+
+func _spawn_capsule_is_clear(space: PhysicsDirectSpaceState3D, capsule: CapsuleShape3D, x: float, z: float, ground_y: float) -> bool:
+	var overlap := PhysicsShapeQueryParameters3D.new()
+	overlap.shape = capsule
+	overlap.transform = Transform3D(Basis.IDENTITY, Vector3(x, ground_y + 0.6, z))
+	overlap.collision_mask = 1
+	for hit in space.intersect_shape(overlap, 32):
+		var collider := hit.get("collider") as Node
+		if collider and _is_floor_collider(collider):
+			continue
+		return false
+	return true
+
+func _is_floor_collider(collider: Node) -> bool:
+	var path := str(collider.get_path()).to_lower()
+	var node_name := collider.name.to_lower()
+	return path.contains("/floor/") or node_name.contains("floor") or node_name.begins_with("zonefloor") or node_name.begins_with("dungeonfloor")
+
+func _spawn_route_is_clear(space: PhysicsDirectSpaceState3D, capsule: CapsuleShape3D, start_x: float, z: float, ground_y: float) -> bool:
+	# Validate a few metres ahead too; a free starting capsule inside a dead end
+	# feels just like broken movement to the player.
+	for step in [0.0, 1.5, 3.0, 4.5, 6.0]:
+		var x: float = start_x + float(step)
+		var overlap := PhysicsShapeQueryParameters3D.new()
+		overlap.shape = capsule
+		overlap.transform = Transform3D(Basis.IDENTITY, Vector3(x, ground_y + 0.6, z))
+		overlap.collision_mask = 1
+		for hit in space.intersect_shape(overlap, 32):
+			var collider := hit.get("collider") as Node
+			if collider and _is_floor_collider(collider):
+				continue
+			return false
+		var ray := PhysicsRayQueryParameters3D.create(Vector3(x, ground_y + 4.0, z), Vector3(x, ground_y - 1.0, z))
+		ray.collision_mask = 1
+		var ground := space.intersect_ray(ray)
+		if ground.is_empty() or absf(ground.position.y - ground_y) > 0.3:
+			return false
+	return true
+
+func _build_camera() -> void:
+	# First-person camera sits at eye height and follows the player's mouse-look pivot.
+	camera = Camera3D.new()
+	camera.name = "FirstPersonCamera"
+	camera.projection = Camera3D.PROJECTION_PERSPECTIVE
+	camera.fov = 76.0
+	camera.near = 0.05
+	camera.position = Vector3(0, 0, 0)
+	var look_pivot := Node3D.new()
+	look_pivot.name = "LookPivot"
+	look_pivot.position.y = 1.0
+	player.add_child(look_pivot)
+	look_pivot.add_child(camera)
+	player.set_look_pivot(look_pivot)
+	# F1 switches to a full-map orthographic view for inspecting the complete layout.
+	overview_camera = Camera3D.new()
+	overview_camera.name = "MapOverviewCamera"
+	overview_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	overview_camera.size = 240.0
+	overview_camera.position = Vector3(WORLD_LENGTH * 0.5, 145.0, 0.0)
+	overview_camera.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
+	add_child(overview_camera)
+	# The first-person camera was previously marked current before entering the
+	# scene tree; explicitly activate it only after both camera nodes are attached.
+	camera.make_current()
+
+func _start_spawn_intro() -> void:
+	# Brief third-person arrival: the character drops into the clear starting
+	# area, then the view settles into first person after landing.
+	var arrival_camera := Camera3D.new()
+	arrival_camera.name = "ArrivalCamera"
+	arrival_camera.fov = 58.0
+	arrival_camera.position = player.global_position + Vector3(-8, 5, 12)
+	add_child(arrival_camera)
+	arrival_camera.look_at(Vector3(player.position.x, 0, player.position.z), Vector3.UP)
+	arrival_camera.make_current()
+	var arrival_label := Label.new()
+	arrival_label.name = "ArrivalMessage"
+	arrival_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	arrival_label.position = Vector2(-220, 120)
+	arrival_label.custom_minimum_size = Vector2(440, 44)
+	arrival_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	arrival_label.text = "LLEGADA A CIUDAD EN RED"
+	_style_cartoon_text(arrival_label, 28)
+	arrival_label.add_theme_color_override("font_color", Color("e8f5ff"))
+	if ui_layer:
+		ui_layer.add_child(arrival_label)
+	await get_tree().create_timer(1.4).timeout
+	var elapsed := 0.0
+	while is_instance_valid(player) and not player.is_on_floor() and elapsed < 2.0:
+		await get_tree().physics_frame
+		elapsed += 1.0 / Engine.physics_ticks_per_second
+	if not is_instance_valid(player):
+		return
+	var visual := player.get_node_or_null("AnimatedCitizen") as Node3D
+	if visual:
+		visual.visible = false
+	player.controls_enabled = true
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	arrival_label.queue_free()
+	camera.make_current()
+	arrival_camera.queue_free()
+
+func _toggle_map_overview() -> void:
+	if overview_camera.current:
+		camera.make_current()
+	else:
+		overview_camera.make_current()
+
+func _build_loading_screen() -> void:
+	var loading_layer := CanvasLayer.new()
+	loading_layer.name = "LoadingScreen"
+	loading_layer.layer = 20
+	add_child(loading_layer)
+	var background := ColorRect.new()
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	background.color = Color("15213a")
+	loading_layer.add_child(background)
+	var title := Label.new()
+	title.set_anchors_preset(Control.PRESET_CENTER)
+	title.position = Vector2(-220, -52)
+	title.custom_minimum_size = Vector2(440, 58)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.text = "PREPARANDO EL REINO"
+	_style_cartoon_text(title, 34)
+	title.add_theme_color_override("font_color", Color("ffe39a"))
+	loading_layer.add_child(title)
+	var progress := ProgressBar.new()
+	progress.set_anchors_preset(Control.PRESET_CENTER)
+	progress.position = Vector2(-180, 18)
+	progress.custom_minimum_size = Vector2(360, 18)
+	progress.value = 65
+	loading_layer.add_child(progress)
+
+func _set_gameplay_ui_visible(visible_now: bool) -> void:
+	if is_instance_valid(gameplay_top_panel): gameplay_top_panel.visible = visible_now
+	if is_instance_valid(gameplay_bottom_panel): gameplay_bottom_panel.visible = false
+	if is_instance_valid(gameplay_crosshair): gameplay_crosshair.visible = visible_now
+	if is_instance_valid(timer_container): timer_container.visible = visible_now
+	if is_instance_valid(prompt): prompt.visible = visible_now
+	if is_instance_valid(panel): panel.visible = false
+	if is_instance_valid(network_panel): network_panel.visible = false
+
+func _show_menu_page(page: String) -> void:
+	if not is_instance_valid(menu_root):
+		return
+	menu_root.visible = true
+	if page == "tutorial":
+		menu_panel.offset_left = -600
+		menu_panel.offset_top = -350
+		menu_panel.offset_right = 600
+		menu_panel.offset_bottom = 350
+		var tutorial_style := StyleBoxFlat.new()
+		tutorial_style.bg_color = Color(0, 0, 0, 0)
+		tutorial_style.border_color = Color(0, 0, 0, 0)
+		menu_panel.add_theme_stylebox_override("panel", tutorial_style)
+		menu_content.add_theme_constant_override("separation", 18)
+	elif page == "settings":
+		menu_panel.offset_left = -430
+		menu_panel.offset_top = -350
+		menu_panel.offset_right = 430
+		menu_panel.offset_bottom = 350
+		var settings_style := StyleBoxFlat.new()
+		settings_style.bg_color = Color(0, 0, 0, 0)
+		settings_style.border_color = Color(0, 0, 0, 0)
+		settings_style.set_border_width_all(0)
+		menu_panel.add_theme_stylebox_override("panel", settings_style)
+		menu_content.add_theme_constant_override("separation", 14)
+	elif page == "home":
+		menu_panel.offset_left = -330
+		menu_panel.offset_top = -350
+		menu_panel.offset_right = 330
+		menu_panel.offset_bottom = 350
+		var home_style := StyleBoxFlat.new()
+		home_style.bg_color = Color(0, 0, 0, 0)
+		home_style.border_color = Color(0, 0, 0, 0)
+		home_style.set_border_width_all(0)
+		menu_panel.add_theme_stylebox_override("panel", home_style)
+		menu_content.add_theme_constant_override("separation", 8)
+	else:
+		menu_panel.offset_left = -390
+		menu_panel.offset_top = -340
+		menu_panel.offset_right = 390
+		menu_panel.offset_bottom = 340
+		var standard_style := StyleBoxFlat.new()
+		standard_style.bg_color = Color(0, 0, 0, 0)
+		standard_style.border_color = Color(0, 0, 0, 0)
+		standard_style.set_border_width_all(0)
+		menu_panel.add_theme_stylebox_override("panel", standard_style)
+		menu_content.add_theme_constant_override("separation", 12)
+	for child in menu_content.get_children():
+		menu_content.remove_child(child)
+		# Do not destroy the button while its pressed signal is still executing.
+		child.queue_free()
+	var title := Label.new()
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_cartoon_text(title, 42)
+	title.add_theme_color_override("font_color", Color("fff0bd"))
+	if page != "tutorial":
+		menu_content.add_child(title)
+	match page:
+		"home":
+			title.text = "BIENVENIDO AL REINO"
+			_add_menu_label("ALCALDE DIGITAL · CIUDAD EN RED", 17)
+			var home_spacer := Control.new()
+			home_spacer.custom_minimum_size = Vector2(1, 6)
+			menu_content.add_child(home_spacer)
+			_add_image_menu_button("JUGAR", 0, func(): _show_menu_page("mode"))
+			_add_image_menu_button("TUTORIAL", 1, func(): _show_menu_page("tutorial"))
+			_add_image_menu_button("AJUSTES", 2, func(): _show_menu_page("settings"))
+		"mode":
+			title.text = "ELIGE EL MODO"
+			_add_menu_button("MODO SOLITARIO", _start_solo_game)
+			_add_menu_button("MODO COOPERATIVO", func(): _show_menu_page("coop"))
+			_add_menu_button("VOLVER", func(): _show_menu_page("home"), Vector2(500, 150))
+		"coop":
+			title.text = "COOPERATIVO · 2–4 HÉROES"
+			_add_menu_label("Crea una sala o únete con el código que te compartieron.", 16)
+			_add_menu_button("CREAR SALA", func(): _show_menu_page("create_room"))
+			_add_menu_button("PARTIDA RÁPIDA", func(): _show_menu_page("quick_join"))
+			_add_menu_button("VOLVER", func(): _show_menu_page("mode"))
+		"create_room":
+			title.text = "CREAR SALA"
+			_add_menu_label("Nombre de la sala", 16)
+			room_name_input = LineEdit.new()
+			room_name_input.placeholder_text = "Ej.: Los guardianes del reino"
+			room_name_input.custom_minimum_size = Vector2(620, 54)
+			_style_cartoon_text(room_name_input, 23)
+			_style_line_edit_cartoon(room_name_input)
+			menu_content.add_child(room_name_input)
+			_add_menu_button("GENERAR CÓDIGO Y ESPERAR", _create_room_from_menu)
+			_add_menu_button("VOLVER", func(): _show_menu_page("coop"))
+		"quick_join":
+			title.text = "PARTIDA RÁPIDA"
+			_add_menu_label("Pega el código de sala que te compartieron.", 16)
+			room_code_input = LineEdit.new()
+			room_code_input.placeholder_text = "Código de sala"
+			room_code_input.custom_minimum_size = Vector2(620, 54)
+			_style_cartoon_text(room_code_input, 23)
+			_style_line_edit_cartoon(room_code_input)
+			menu_content.add_child(room_code_input)
+			_add_menu_button("CONECTAR", _join_room_code)
+			_add_menu_button("VOLVER", func(): _show_menu_page("coop"))
+		"lobby":
+			title.text = "SALA LISTA"
+			_add_menu_label("Sala: %s\nCódigo: %s\nJugadores: %d/4\nComparte el código e inicia cuando estén listos. El código conecta por red local; para Internet se necesita abrir UDP 7777 o usar un servidor de retransmisión." % [random_room_name, random_room_code, maxi(network_peer_ids.size(), 1)], 15)
+			_add_menu_button("INICIAR PARTIDA", _start_network_match)
+			_add_menu_button("CANCELAR SALA", _cancel_room)
+		"waiting":
+			title.text = "CONECTADO A LA SALA"
+			_add_menu_label("Esperando a que el anfitrión inicie la partida…", 17)
+			_add_menu_button("CANCELAR", _cancel_room)
+		"tutorial":
+			var tutorial_art := TextureRect.new()
+			tutorial_art.texture = load("res://assets/ui/tutorial_controls.png") as Texture2D
+			tutorial_art.custom_minimum_size = Vector2(1120, 390)
+			tutorial_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			tutorial_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			tutorial_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			menu_content.add_child(tutorial_art)
+			_add_menu_button("VOLVER", func(): _show_menu_page("home"), Vector2(500, 150))
+		"settings":
+			title.text = "AJUSTES"
+			_add_menu_label("Volumen general", 16)
+			volume_slider = HSlider.new()
+			volume_slider.min_value = 0.0
+			volume_slider.max_value = 1.0
+			volume_slider.step = 0.05
+			volume_slider.value = _load_setting_float("volume", 0.8)
+			volume_slider.custom_minimum_size = Vector2(620, 46)
+			_style_slider_cartoon(volume_slider)
+			volume_slider.value_changed.connect(_on_volume_changed)
+			menu_content.add_child(volume_slider)
+			var lights_toggle := CheckButton.new()
+			lights_toggle.text = "Luces nocturnas y luciérnagas"
+			lights_toggle.custom_minimum_size = Vector2(620, 48)
+			_style_cartoon_text(lights_toggle, 24)
+			_style_check_button_cartoon(lights_toggle)
+			lights_toggle.button_pressed = _load_setting_bool("lights_enabled", true)
+			lights_toggle.toggled.connect(_on_lights_toggled)
+			menu_content.add_child(lights_toggle)
+			_add_menu_label("Escala de interfaz", 16)
+			scale_picker = OptionButton.new()
+			scale_picker.add_item("Pequeña · 85%", 0)
+			scale_picker.add_item("Normal · 100%", 1)
+			scale_picker.add_item("Grande · 115%", 2)
+			scale_picker.selected = clampi(roundi((_load_setting_float("ui_scale", 1.0) - 0.85) / 0.15), 0, 2)
+			scale_picker.item_selected.connect(_on_scale_selected)
+			scale_picker.custom_minimum_size = Vector2(620, 58)
+			_style_option_button_cartoon(scale_picker)
+			menu_content.add_child(scale_picker)
+			_add_menu_button("VOLVER", func(): _show_menu_page("home"))
+		"defeat":
+			title.text = "EL REY YA HIZO SU ANUNCIO"
+			_add_menu_label("Se agotó el tiempo antes de completar las misiones. Vuelve a intentarlo.", 16)
+			_add_menu_button("VOLVER AL INICIO", _return_to_menu)
+		"victory":
+			title.text = "¡EL REINO ESTÁ A SALVO!"
+			_add_menu_label("Completaste las misiones y frenaste la desinformación.", 17)
+			_add_menu_button("VOLVER AL INICIO", _return_to_menu)
+
+func _add_menu_label(message: String, size: int) -> void:
+	var label := Label.new()
+	label.text = message
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_style_cartoon_text(label, size + 5)
+	label.add_theme_color_override("font_color", Color("f7f2df"))
+	menu_content.add_child(label)
+
+func _style_cartoon_text(control: Control, font_size: int) -> void:
+	control.add_theme_font_override("font", CARTOON_FONT)
+	control.add_theme_font_size_override("font_size", font_size)
+	control.add_theme_color_override("font_outline_color", Color("392012"))
+	control.add_theme_constant_override("outline_size", 2)
+	control.add_theme_color_override("font_shadow_color", Color(0.12, 0.06, 0.02, 0.85))
+	control.add_theme_constant_override("shadow_offset_x", 2)
+	control.add_theme_constant_override("shadow_offset_y", 3)
+
+func _style_slider_cartoon(slider: HSlider) -> void:
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color("432819")
+	track.border_color = Color("d99737")
+	track.set_border_width_all(2)
+	track.set_corner_radius_all(8)
+	slider.add_theme_stylebox_override("slider", track)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color("f2b841")
+	fill.set_corner_radius_all(8)
+	slider.add_theme_stylebox_override("grabber_area", fill)
+	var highlight := StyleBoxFlat.new()
+	highlight.bg_color = Color("ffd876")
+	highlight.set_corner_radius_all(8)
+	slider.add_theme_stylebox_override("grabber_area_highlight", highlight)
+
+func _style_check_button_cartoon(check_button: CheckButton) -> void:
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color("59351f", 0.92)
+	normal.border_color = Color("d99b39")
+	normal.set_border_width_all(2)
+	normal.set_corner_radius_all(12)
+	normal.content_margin_left = 18
+	normal.content_margin_right = 18
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = Color("704627", 0.96)
+	hover.border_color = Color("ffe087")
+	var pressed := normal.duplicate() as StyleBoxFlat
+	pressed.bg_color = Color("3f2a1c", 0.98)
+	check_button.add_theme_stylebox_override("normal", normal)
+	check_button.add_theme_stylebox_override("hover", hover)
+	check_button.add_theme_stylebox_override("pressed", pressed)
+	check_button.add_theme_stylebox_override("hover_pressed", hover)
+
+func _style_option_button_cartoon(option: OptionButton) -> void:
+	_style_cartoon_text(option, 23)
+	option.add_theme_constant_override("h_separation", 24)
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color("59351f")
+	normal.border_color = Color("e4a735")
+	normal.set_border_width_all(3)
+	normal.set_corner_radius_all(14)
+	normal.content_margin_left = 22
+	normal.content_margin_right = 26
+	normal.content_margin_top = 8
+	normal.content_margin_bottom = 8
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = Color("704627")
+	hover.border_color = Color("ffe087")
+	var pressed := normal.duplicate() as StyleBoxFlat
+	pressed.bg_color = Color("3f2a1c")
+	option.add_theme_stylebox_override("normal", normal)
+	option.add_theme_stylebox_override("hover", hover)
+	option.add_theme_stylebox_override("pressed", pressed)
+	option.add_theme_stylebox_override("focus", hover)
+	option.add_theme_color_override("font_color", Color("fff0bd"))
+	option.add_theme_color_override("font_hover_color", Color("fff7d7"))
+	option.add_theme_color_override("font_pressed_color", Color("fff0bd"))
+
+func _style_line_edit_cartoon(edit: LineEdit) -> void:
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color("58361f")
+	normal.border_color = Color("e9ae40")
+	normal.set_border_width_all(3)
+	normal.set_corner_radius_all(10)
+	normal.content_margin_left = 16
+	normal.content_margin_right = 16
+	var focused := normal.duplicate() as StyleBoxFlat
+	focused.border_color = Color("ffe28a")
+	edit.add_theme_stylebox_override("normal", normal)
+	edit.add_theme_stylebox_override("focus", focused)
+	edit.add_theme_color_override("font_color", Color("fff0bd"))
+	edit.add_theme_color_override("font_placeholder_color", Color("e5cba4"))
+
+func _add_menu_button(caption: String, callback: Callable, button_size: Vector2 = Vector2(430, 135)) -> void:
+	var button := Button.new()
+	button.text = ""
+	button.custom_minimum_size = button_size
+	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	button.focus_mode = Control.FOCUS_ALL
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
+	var source := load(MENU_BUTTONS_PATH) as Texture2D
+	if source != null:
+		var plaque := _button_plaque(source, 1)
+		button.add_theme_stylebox_override("normal", _make_button_image_style(plaque, Color.WHITE))
+		button.add_theme_stylebox_override("hover", _make_button_image_style(plaque, Color(1.16, 1.12, 0.96)))
+		button.add_theme_stylebox_override("pressed", _make_button_image_style(plaque, Color(0.78, 0.68, 0.48)))
+		button.add_theme_stylebox_override("focus", _make_button_image_style(plaque, Color(1.08, 1.04, 0.92)))
+		button.mouse_entered.connect(func(): _animate_image_menu_button(button, Color(1.1, 1.06, 0.94)))
+		button.mouse_exited.connect(func(): _animate_image_menu_button(button, Color.WHITE))
+	else:
+		var fallback := StyleBoxFlat.new()
+		fallback.bg_color = Color("315171")
+		fallback.border_color = Color("e7bd68")
+		fallback.set_border_width_all(2)
+		fallback.set_corner_radius_all(14)
+		button.add_theme_stylebox_override("normal", fallback)
+	_add_extruded_button_text(button, caption, mini(43, clampi(int(760.0 / maxf(float(caption.length()), 9.0)), 20, 43)))
+	button.pressed.connect(callback)
+	menu_content.add_child(button)
+
+func _add_image_menu_button(caption: String, atlas_index: int, callback: Callable) -> void:
+	var source := load(MENU_BUTTONS_PATH) as Texture2D
+	if source == null:
+		_add_menu_button(caption, callback)
+		return
+	var plaque := _button_plaque(source, atlas_index)
+	var button := Button.new()
+	button.name = "ImageButton_%s" % caption.to_pascal_case()
+	button.focus_mode = Control.FOCUS_ALL
+	button.custom_minimum_size = Vector2(535, 178)
+	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
+	button.text = ""
+	var normal_style := _make_button_image_style(plaque, Color.WHITE)
+	var hover_style := _make_button_image_style(plaque, Color(1.16, 1.12, 0.96))
+	var pressed_style := _make_button_image_style(plaque, Color(0.78, 0.68, 0.48))
+	button.add_theme_stylebox_override("normal", normal_style)
+	button.add_theme_stylebox_override("hover", hover_style)
+	button.add_theme_stylebox_override("pressed", pressed_style)
+	button.add_theme_stylebox_override("focus", hover_style)
+	_add_extruded_button_text(button, caption, 39)
+	button.pressed.connect(callback)
+	button.mouse_entered.connect(func(): _animate_image_menu_button(button, Color(1.1, 1.06, 0.94)))
+	button.mouse_exited.connect(func(): _animate_image_menu_button(button, Color.WHITE))
+	menu_content.add_child(button)
+
+func _add_extruded_button_text(button: Button, caption: String, lettering_size: int = 39) -> void:
+	# Stacked cartoon lettering gives the glyphs a raised, extruded look while
+	# keeping the plaque artwork crisp and the button fully clickable.
+	var layers := [
+		{"offset":Vector2(0, 7), "fill":Color("54200c"), "outline":Color("54200c"), "outline_size":6},
+		{"offset":Vector2(0, 3), "fill":Color("d47819"), "outline":Color("71320e"), "outline_size":4},
+		{"offset":Vector2.ZERO, "fill":Color("fff0bd"), "outline":Color("63300f"), "outline_size":2}
+	]
+	for layer_data in layers:
+		var label := Label.new()
+		label.name = "RaisedLetterLayer"
+		label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		var offset: Vector2 = layer_data["offset"]
+		label.offset_left = offset.x
+		label.offset_right = offset.x
+		label.offset_top = offset.y
+		label.offset_bottom = offset.y
+		label.text = caption
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		label.add_theme_font_override("font", CARTOON_FONT)
+		label.add_theme_font_size_override("font_size", lettering_size)
+		label.add_theme_color_override("font_color", layer_data["fill"])
+		label.add_theme_color_override("font_outline_color", layer_data["outline"])
+		label.add_theme_constant_override("outline_size", layer_data["outline_size"])
+		button.add_child(label)
+
+func _button_plaque(source: Texture2D, atlas_index: int) -> AtlasTexture:
+	var row_regions := [
+		Rect2(280.0, 25.0, 970.0, 345.0),
+		Rect2(280.0, 372.0, 970.0, 328.0),
+		Rect2(280.0, 704.0, 970.0, 312.0)
+	]
+	var plaque := AtlasTexture.new()
+	plaque.atlas = source
+	plaque.region = row_regions[clampi(atlas_index, 0, row_regions.size() - 1)]
+	return plaque
+
+func _make_button_image_style(plaque: AtlasTexture, tint: Color) -> StyleBoxTexture:
+	var style := StyleBoxTexture.new()
+	style.texture = plaque
+	style.modulate_color = tint
+	style.texture_margin_left = 18.0
+	style.texture_margin_right = 18.0
+	style.texture_margin_top = 16.0
+	style.texture_margin_bottom = 16.0
+	style.content_margin_left = 18.0
+	style.content_margin_right = 18.0
+	style.content_margin_top = 8.0
+	style.content_margin_bottom = 8.0
+	return style
+
+func _animate_image_menu_button(button: Button, target_tint: Color) -> void:
+	if not is_instance_valid(button):
+		return
+	var tween := create_tween()
+	tween.set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(button, "modulate", target_tint, 0.12)
+
+func _add_tutorial_card(icon_text: String, description: String) -> void:
+	var row := HBoxContainer.new()
+	row.custom_minimum_size = Vector2(380, 34)
+	var icon := Label.new()
+	icon.text = icon_text
+	icon.custom_minimum_size = Vector2(145, 32)
+	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_cartoon_text(icon, 19)
+	icon.add_theme_color_override("font_color", Color("ffe39a"))
+	row.add_child(icon)
+	var text_label := Label.new()
+	text_label.text = description
+	text_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_style_cartoon_text(text_label, 18)
+	text_label.add_theme_color_override("font_color", Color("f7f2df"))
+	row.add_child(text_label)
+	menu_content.add_child(row)
+
+func _load_setting_float(key: String, fallback: float) -> float:
+	var cfg := ConfigFile.new()
+	cfg.load("user://settings.cfg")
+	return float(cfg.get_value("settings", key, fallback))
+
+func _load_setting_bool(key: String, fallback: bool) -> bool:
+	var cfg := ConfigFile.new()
+	cfg.load("user://settings.cfg")
+	return bool(cfg.get_value("settings", key, fallback))
+
+func _save_setting(key: String, value: Variant) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load("user://settings.cfg")
+	cfg.set_value("settings", key, value)
+	cfg.save("user://settings.cfg")
+
+func _on_volume_changed(value: float) -> void:
+	var master_bus := AudioServer.get_bus_index("Master")
+	if master_bus >= 0:
+		AudioServer.set_bus_volume_linear(master_bus, value)
+		AudioServer.set_bus_mute(master_bus, value <= 0.001)
+	_save_setting("volume", value)
+
+func _on_lights_toggled(enabled: bool) -> void:
+	lights_enabled = enabled
+	_save_setting("lights_enabled", enabled)
+	var night_amount := 0.0
+	if day_sky != null:
+		night_amount = float(day_sky.get_shader_parameter("night_amount"))
+	for glow in npc_night_lights:
+		if is_instance_valid(glow):
+			glow.visible = enabled and night_amount > 0.005
+	for glow in chest_lights:
+		if is_instance_valid(glow):
+			glow.visible = enabled and night_amount > 0.005
+	for firefly in firefly_nodes:
+		if not is_instance_valid(firefly):
+			continue
+		var orb := firefly.get_node_or_null("FireflyOrb") as MeshInstance3D
+		if orb != null:
+			orb.visible = enabled and day_sky != null and float(day_sky.get_shader_parameter("night_amount")) > 0.005
+		var glow := firefly.get_node_or_null("FireflyGlow") as OmniLight3D
+		if glow != null:
+			glow.visible = enabled and night_amount > 0.005
+
+func _on_scale_selected(index: int) -> void:
+	var factors := [0.85, 1.0, 1.15]
+	var factor := float(factors[clampi(index, 0, factors.size() - 1)])
+	get_window().content_scale_factor = factor
+	_save_setting("ui_scale", factor)
+
+func _create_room_from_menu() -> void:
+	random_room_name = room_name_input.text.strip_edges() if room_name_input != null else ""
+	if random_room_name.is_empty():
+		random_room_name = "Reino cooperativo"
+	_host_network_game()
+	if multiplayer.multiplayer_peer == null:
+		_show_menu_page("create_room")
+		_add_menu_label(network_status.text, 14)
+		return
+	var host_address := "127.0.0.1"
+	for address in IP.get_local_addresses():
+		var candidate := String(address)
+		if candidate.contains(".") and not candidate.begins_with("127.") and not candidate.begins_with("169.254."):
+			host_address = candidate
+			break
+	var nonce := str(randi_range(100000, 999999))
+	var payload := "%s|7777|%s" % [host_address, nonce]
+	random_room_code = Marshalls.raw_to_base64(payload.to_utf8_buffer()).replace("+", "-").replace("/", "_").replace("=", "")
+	_show_menu_page("lobby")
+
+func _decode_room_code(value: String) -> String:
+	var code := value.strip_edges()
+	if code.contains("."):
+		return code
+	code = code.replace("-", "+").replace("_", "/")
+	while code.length() % 4 != 0:
+		code += "="
+	var payload := Marshalls.base64_to_raw(code).get_string_from_utf8()
+	var parts := payload.split("|")
+	if parts.size() >= 2 and parts[0].contains("."):
+		return parts[0]
+	return ""
+
+func _join_room_code() -> void:
+	if room_code_input == null or room_code_input.text.strip_edges().is_empty():
+		return
+	var host := _decode_room_code(room_code_input.text)
+	if host.is_empty():
+		if network_status != null:
+			network_status.text = "El código no es válido. Pide al anfitrión un código nuevo."
+			_show_menu_page("quick_join")
+			_add_menu_label(network_status.text, 15)
+		return
+	room_code_input.text = host
+	address_input = room_code_input
+	_join_network_game()
+	if multiplayer.multiplayer_peer != null:
+		_show_menu_page("waiting")
+
+func _cancel_room() -> void:
+	multiplayer.multiplayer_peer = null
+	is_solo_mode = true
+	is_network_host = false
+	network_peer_ids.clear()
+	game_running = false
+	gameplay_started = false
+	player.controls_enabled = false
+	player.set_physics_process(false)
+	_set_gameplay_ui_visible(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_show_menu_page("home")
+
+func _start_solo_game() -> void:
+	if multiplayer.multiplayer_peer != null:
+		multiplayer.multiplayer_peer = null
+	role_assignments = ROLE_MANAGER.assign_roles(1)
+	local_roles = role_assignments[0]
+	active_role_index = 0
+	active_role = String(local_roles[0])
+	is_solo_mode = true
+	_reset_match_state()
+	_update_role_ui()
+	_update_information_hud()
+	_launch_game()
+
+func _start_network_match() -> void:
+	if not is_network_host or network_peer_ids.size() < 2:
+		_show_menu_page("lobby")
+		_add_menu_label("Espera a que se conecte al menos otro jugador.", 15)
+		return
+	_reset_match_state()
+	rpc("_receive_match_start")
+	_launch_game()
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_match_start() -> void:
+	_reset_match_state()
+	_launch_game()
+
+func _reset_match_state() -> void:
+	collected_info.clear()
+	info_delivered = false
+	interviewed_npcs.clear()
+	informed_npcs.clear()
+	cheered_npcs.clear()
+	bard_cooldowns.clear()
+	journalist_verified = false
+	journalist_results.clear()
+	influencer_has_information = false
+	answered = 0
+	roulette_used = false
+	game_time_remaining = GAME_DURATION_SECONDS
+	game_timer_timeout = false
+	for state in npc_targets:
+		state.mood = 1.0
+		state.seconds_left = npc_mood_duration
+		state.recharging = false
+		state.recharge_elapsed = 0.0
+
+func _launch_game() -> void:
+	if gameplay_started:
+		return
+	gameplay_started = true
+	game_running = true
+	game_timer_timeout = false
+	day_cycle_elapsed = 0.0
+	if day_phase_presets.size() >= 3:
+		_apply_day_phase(day_phase_presets[0], day_phase_presets[0], 0.0)
+	_update_timer_hud()
+	_update_information_hud()
+	menu_root.visible = false
+	_set_gameplay_ui_visible(true)
+	player.controls_enabled = true
+	player.set_physics_process(true)
+	_start_spawn_intro()
+
+func _return_to_menu() -> void:
+	game_running = false
+	gameplay_started = false
+	player.controls_enabled = false
+	player.set_physics_process(false)
+	_set_gameplay_ui_visible(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_show_menu_page("home")
+
+func _end_game(won: bool) -> void:
+	game_running = false
+	player.controls_enabled = false
+	player.set_physics_process(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_set_gameplay_ui_visible(false)
+	_show_menu_page("victory" if won else "defeat")
+
+func _check_game_completion() -> void:
+	if not game_running:
+		return
+	var all_objectives_complete := collected_info.size() == info_chests.size() and info_delivered
+	all_objectives_complete = all_objectives_complete and interviewed_npcs.size() == npc_targets.size() and journalist_verified
+	all_objectives_complete = all_objectives_complete and informed_npcs.size() == npc_targets.size() and cheered_npcs.size() == npc_targets.size()
+	if all_objectives_complete:
+		_end_game(true)
+
+func _update_timer_hud() -> void:
+	if time_progress == null:
+		return
+	time_progress.value = game_time_remaining
+	var progress_ratio := game_time_remaining / GAME_DURATION_SECONDS
+	time_crown.position.x = -238.0 + 476.0 * progress_ratio
+	time_crown.add_theme_color_override("font_color", Color("ffe39a").lerp(Color("ff7777"), 1.0 - progress_ratio))
+
+func _build_ui() -> void:
+	var layer := CanvasLayer.new()
+	ui_layer = layer
+	add_child(layer)
+	var top := PanelContainer.new()
+	top.name = "GameplayStatus"
+	gameplay_top_panel = top
+	top.position = Vector2(22, 18)
+	top.custom_minimum_size = Vector2(420, 104)
+	_style_panel(top, Color("171d2b"), Color("526c83"))
+	var top_content := VBoxContainer.new()
+	var top_label := Label.new()
+	top_label.text = "ALCALDE DIGITAL     ◆     CIUDAD EN RED\nVerifica antes de compartir  ·  Explora tres distritos"
+	_style_cartoon_text(top_label, 20)
+	top_label.visible = false
+	top_content.add_child(top_label)
+	solo_role_button = Button.new()
+	solo_role_button.custom_minimum_size = Vector2(360, 34)
+	_style_cartoon_text(solo_role_button, 19)
+	solo_role_button.pressed.connect(_cycle_solo_role)
+	top_content.add_child(solo_role_button)
+	network_button = Button.new()
+	network_button.text = "Multijugador por red"
+	_style_cartoon_text(network_button, 19)
+	network_button.visible = false
+	network_button.custom_minimum_size = Vector2(360, 32)
+	network_button.pressed.connect(_open_network_panel)
+	top_content.add_child(network_button)
+	top.custom_minimum_size = Vector2(420, 76)
+	hud = Label.new()
+	_style_cartoon_text(hud, 18)
+	hud.text = "◆ Ciudadanía: 0 / 3     ◆ Confianza: 100%"
+	top_content.add_child(hud)
+	top.add_child(top_content)
+	layer.add_child(top)
+	var bottom := PanelContainer.new()
+	gameplay_bottom_panel = bottom
+	bottom.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	bottom.offset_top = -62
+	bottom.offset_bottom = -14
+	_style_panel(bottom, Color("171d2b"), Color("526c83"))
+	var bottom_label := Label.new()
+	bottom_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bottom_label.text = "WASD mover · Ratón mirar · ESPACIO saltar · E interactuar · TAB cambiar rol"
+	bottom_label.visible = false
+	_style_cartoon_text(bottom_label, 17)
+	bottom.add_child(bottom_label)
+	layer.add_child(bottom)
+	var crosshair := Label.new()
+	gameplay_crosshair = crosshair
+	crosshair.set_anchors_preset(Control.PRESET_CENTER)
+	crosshair.offset_left = -9
+	crosshair.offset_top = -14
+	crosshair.offset_right = 9
+	crosshair.offset_bottom = 14
+	crosshair.text = "+"
+	crosshair.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	crosshair.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_style_cartoon_text(crosshair, 20)
+	crosshair.add_theme_color_override("font_color", Color("e8f5ff"))
+	crosshair.add_theme_color_override("font_shadow_color", Color("111827"))
+	crosshair.add_theme_constant_override("shadow_offset_x", 1)
+	crosshair.add_theme_constant_override("shadow_offset_y", 1)
+	layer.add_child(crosshair)
+	prompt = Label.new()
+	prompt.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	prompt.position = Vector2(-150, -104)
+	prompt.custom_minimum_size = Vector2(300, 36)
+	prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_cartoon_text(prompt, 22)
+	layer.add_child(prompt)
+	panel = PanelContainer.new()
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.position = Vector2(-300, -205)
+	panel.custom_minimum_size = Vector2(600, 410)
+	panel.visible = false
+	_style_panel(panel, Color("171d2b"), Color("73c9c9"))
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 26)
+	margin.add_theme_constant_override("margin_right", 26)
+	margin.add_theme_constant_override("margin_top", 20)
+	margin.add_theme_constant_override("margin_bottom", 20)
+	panel_text = Label.new()
+	panel_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_style_cartoon_text(panel_text, 23)
+	margin.add_child(panel_text)
+	panel.add_child(margin)
+	layer.add_child(panel)
+	network_panel = PanelContainer.new()
+	network_panel.set_anchors_preset(Control.PRESET_CENTER)
+	network_panel.position = Vector2(-250, -145)
+	network_panel.custom_minimum_size = Vector2(500, 290)
+	network_panel.visible = false
+	_style_panel(network_panel, Color("171d2b"), Color("73c9c9"))
+	var network_box := VBoxContainer.new()
+	var network_title := Label.new()
+	network_title.text = "PARTIDA COOPERATIVA · RED/INTERNET"
+	_style_cartoon_text(network_title, 23)
+	network_box.add_child(network_title)
+	var network_instructions := Label.new()
+	network_instructions.text = "El anfitrión crea la sala. Los demás se conectan con su IP pública o LAN. Puerto UDP: 7777. Para jugar por Internet, el anfitrión debe permitir/redirigir ese puerto en su router."
+	network_instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_style_cartoon_text(network_instructions, 18)
+	network_box.add_child(network_instructions)
+	var host_button := Button.new()
+	host_button.text = "Crear sala (anfitrión)"
+	_style_cartoon_text(host_button, 20)
+	host_button.pressed.connect(_host_network_game)
+	network_box.add_child(host_button)
+	address_input = LineEdit.new()
+	address_input.placeholder_text = "IP del anfitrión (ej. 192.168.1.20)"
+	_style_cartoon_text(address_input, 19)
+	_style_line_edit_cartoon(address_input)
+	network_box.add_child(address_input)
+	var join_button := Button.new()
+	join_button.text = "Conectarme"
+	_style_cartoon_text(join_button, 20)
+	join_button.pressed.connect(_join_network_game)
+	network_box.add_child(join_button)
+	var exit_network_button := Button.new()
+	exit_network_button.text = "Volver a modo solitario"
+	_style_cartoon_text(exit_network_button, 20)
+	exit_network_button.pressed.connect(_exit_network_game)
+	network_box.add_child(exit_network_button)
+	network_status = Label.new()
+	network_status.text = "Admite 2–4 jugadores. Los roles se sortean sin repetirse."
+	network_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_style_cartoon_text(network_status, 18)
+	network_box.add_child(network_status)
+	network_panel.add_child(network_box)
+	layer.add_child(network_panel)
+	var timer_container := Control.new()
+	self.timer_container = timer_container
+	timer_container.name = "KingdomTimer"
+	timer_container.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	timer_container.offset_left = -250
+	timer_container.offset_top = 22
+	timer_container.offset_right = 250
+	timer_container.offset_bottom = 58
+	var timer_background := StyleBoxFlat.new()
+	timer_background.bg_color = Color("19243a")
+	timer_background.set_corner_radius_all(10)
+	timer_background.border_color = Color("e7bd68")
+	timer_background.set_border_width_all(2)
+	time_progress = ProgressBar.new()
+	time_progress.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	time_progress.min_value = 0.0
+	time_progress.max_value = GAME_DURATION_SECONDS
+	time_progress.value = GAME_DURATION_SECONDS
+	time_progress.show_percentage = false
+	time_progress.add_theme_stylebox_override("background", timer_background)
+	var timer_fill := StyleBoxFlat.new()
+	timer_fill.bg_color = Color("76d6bd")
+	timer_fill.set_corner_radius_all(8)
+	time_progress.add_theme_stylebox_override("fill", timer_fill)
+	timer_container.add_child(time_progress)
+	time_crown = Label.new()
+	time_crown.text = "♛"
+	time_crown.position = Vector2(228, -9)
+	time_crown.custom_minimum_size = Vector2(28, 34)
+	_style_cartoon_text(time_crown, 29)
+	time_crown.add_theme_font_override("font", CARTOON_FONT)
+	time_crown.add_theme_color_override("font_color", Color("ffe39a"))
+	timer_container.add_child(time_crown)
+	layer.add_child(timer_container)
+	var background_root := Control.new()
+	background_root.name = "MainMenu"
+	background_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(background_root)
+	menu_root = background_root
+	var menu_background := TextureRect.new()
+	menu_background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	menu_background.texture = load(MENU_BACKGROUND_PATH) as Texture2D
+	menu_background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	menu_background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	menu_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	background_root.add_child(menu_background)
+	var menu_shade := ColorRect.new()
+	menu_shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	menu_shade.color = Color(0.04, 0.07, 0.13, 0.34)
+	menu_shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	background_root.add_child(menu_shade)
+	menu_panel = PanelContainer.new()
+	menu_panel.set_anchors_preset(Control.PRESET_CENTER)
+	menu_panel.offset_left = -250
+	menu_panel.offset_top = -300
+	menu_panel.offset_right = 250
+	menu_panel.offset_bottom = 300
+	menu_panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	var menu_style := StyleBoxFlat.new()
+	menu_style.bg_color = Color(0, 0, 0, 0)
+	menu_style.border_color = Color(0, 0, 0, 0)
+	menu_style.set_border_width_all(0)
+	menu_panel.add_theme_stylebox_override("panel", menu_style)
+	var menu_margin := MarginContainer.new()
+	menu_margin.add_theme_constant_override("margin_left", 22)
+	menu_margin.add_theme_constant_override("margin_right", 22)
+	menu_margin.add_theme_constant_override("margin_top", 20)
+	menu_margin.add_theme_constant_override("margin_bottom", 20)
+	menu_content = VBoxContainer.new()
+	menu_content.add_theme_constant_override("separation", 12)
+	menu_margin.add_child(menu_content)
+	menu_panel.add_child(menu_margin)
+	background_root.add_child(menu_panel)
+	background_root.visible = false
+	gameplay_top_panel.visible = false
+	gameplay_bottom_panel.visible = false
+	gameplay_crosshair.visible = false
+	prompt.visible = false
+	timer_container.visible = false
+	_update_role_ui()
+	_update_information_hud()
+
+func _cycle_solo_role() -> void:
+	if local_roles.size() < 2:
+		return
+	active_role_index = (active_role_index + 1) % local_roles.size()
+	active_role = String(local_roles[active_role_index])
+	_update_role_ui()
+	_update_information_hud()
+
+func _update_role_ui() -> void:
+	if solo_role_button == null:
+		return
+	solo_role_button.visible = local_roles.size() > 1
+	solo_role_button.disabled = local_roles.size() < 2
+	if is_solo_mode:
+		solo_role_button.text = "Rol: %s" % _role_display_name(active_role)
+	else:
+		var shown_roles: Array[String] = []
+		for role in local_roles:
+			shown_roles.append(_role_display_name(String(role)))
+		solo_role_button.text = "Roles: %s  ·  Activo: %s" % [", ".join(PackedStringArray(shown_roles)), _role_display_name(active_role)]
+	if network_button != null:
+		network_button.text = "Red: %d jugador(es)" % maxi(1, network_peer_ids.size())
+
+func _role_display_name(role: String) -> String:
+	match role:
+		"Ciudadano": return "Héroe"
+		"Periodista": return "Mensajero"
+		"Influencer": return "Bardo"
+		"Candidato a alcalde": return "Revolucionario"
+		_: return role
+
+func _role_mission(role: String) -> String:
+	match role:
+		"Ciudadano":
+			return "Reúne y entrega fichas: %d/%d" % [collected_info.size(), info_chests.size()]
+		"Periodista":
+			if journalist_verified: return "Información verificada"
+			if info_delivered: return "Verifica los datos en la taquilla"
+			return "Entrevista vecinos: %d/%d" % [interviewed_npcs.size(), npc_targets.size()]
+		"Influencer":
+			if not influencer_has_information: return "Espera la información del Mensajero"
+			return "Comparte los datos: %d/%d" % [informed_npcs.size(), npc_targets.size()]
+		"Candidato a alcalde":
+			return "Anima a vecinos: %d/%d" % [cheered_npcs.size(), npc_targets.size()]
+		_: return "Completa tu misión"
+
+func _open_network_panel() -> void:
+	if network_panel != null:
+		network_panel.visible = not network_panel.visible
+
+func _host_network_game() -> void:
+	var peer := ENetMultiplayerPeer.new()
+	var result := peer.create_server(7777, 4)
+	if result != OK:
+		network_status.text = "No se pudo abrir el puerto 7777. Código: %d" % result
+		return
+	multiplayer.multiplayer_peer = peer
+	is_network_host = true
+	is_solo_mode = false
+	network_peer_ids = [1]
+	network_status.text = "Sala creada en el puerto 7777. Comparte tu IP pública/LAN; esperando jugadores (2–4)."
+	_update_role_ui()
+
+func _join_network_game() -> void:
+	var address := address_input.text.strip_edges()
+	if address.is_empty():
+		network_status.text = "Escribe la IP del anfitrión."
+		return
+	var peer := ENetMultiplayerPeer.new()
+	var result := peer.create_client(address, 7777)
+	if result != OK:
+		network_status.text = "No se pudo iniciar la conexión. Código: %d" % result
+		return
+	multiplayer.multiplayer_peer = peer
+	is_solo_mode = false
+	network_status.text = "Conectando con %s:7777…" % address
+
+func _on_network_peer_connected(peer_id: int) -> void:
+	if not is_network_host:
+		return
+	if not network_peer_ids.has(peer_id):
+		network_peer_ids.append(peer_id)
+		network_peer_ids.sort()
+		rpc_id(peer_id, "_receive_remote_transform", 1, player.global_position, player.rotation.y)
+	_update_role_ui()
+	if network_peer_ids.size() <= 4:
+		_assign_network_roles()
+		if is_instance_valid(menu_root) and menu_root.visible:
+			_show_menu_page("lobby")
+
+func _on_connected_to_server() -> void:
+	network_status.text = "Conectado al anfitrión. Solicitando roles…"
+	_show_menu_page("waiting")
+	_add_menu_label(network_status.text, 14)
+	rpc_id(1, "_request_network_roles")
+
+func _on_connection_failed() -> void:
+	network_status.text = "No se pudo conectar. Revisa la IP, el puerto 7777 y el firewall del anfitrión."
+	_show_menu_page("quick_join")
+	_add_menu_label(network_status.text, 14)
+
+func _on_server_disconnected() -> void:
+	network_status.text = "Se perdió la conexión con el anfitrión."
+	multiplayer.multiplayer_peer = null
+	is_solo_mode = true
+	role_assignments = ROLE_MANAGER.assign_roles(1)
+	local_roles = role_assignments[0]
+	active_role_index = 0
+	active_role = String(local_roles[0])
+	_update_role_ui()
+	_show_menu_page("home")
+	_add_menu_label(network_status.text, 14)
+
+func _assign_network_roles() -> void:
+	if not is_network_host or network_peer_ids.size() < 2 or network_peer_ids.size() > 4:
+		return
+	role_assignments = ROLE_MANAGER.assign_roles(network_peer_ids.size())
+	for index in range(network_peer_ids.size()):
+		var peer_id: int = network_peer_ids[index]
+		var roles_for_player: Array = role_assignments[index]
+		if peer_id == 1:
+			_apply_network_roles(roles_for_player)
+		else:
+			rpc_id(peer_id, "_receive_network_roles", roles_for_player)
+	network_status.text = "Roles sorteados sin repetir entre %d jugadores." % network_peer_ids.size()
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_network_roles() -> void:
+	if multiplayer.is_server():
+		_assign_network_roles()
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_network_roles(roles_for_player: Array) -> void:
+	_apply_network_roles(roles_for_player)
+
+func _apply_network_roles(roles_for_player: Array) -> void:
+	local_roles = roles_for_player.duplicate()
+	if local_roles.is_empty():
+		return
+	active_role_index = 0
+	active_role = String(local_roles[0])
+	is_solo_mode = false
+	_update_role_ui()
+	_update_information_hud()
+	_broadcast_coop_state()
+
+@rpc("any_peer", "call_remote", "unreliable_ordered")
+func _receive_remote_transform(peer_id: int, position: Vector3, yaw: float) -> void:
+	if peer_id == multiplayer.get_unique_id():
+		return
+	var avatar := remote_players.get(peer_id) as Node3D
+	if avatar == null:
+		avatar = Node3D.new()
+		avatar.name = "RemotePlayer_%d" % peer_id
+		var body := MeshInstance3D.new()
+		var capsule := CapsuleMesh.new()
+		capsule.radius = 0.34
+		capsule.height = 1.65
+		body.mesh = capsule
+		var material := StandardMaterial3D.new()
+		material.albedo_color = Color("38c9d2") if peer_id % 2 == 0 else Color("f28e4b")
+		body.material_override = material
+		avatar.add_child(body)
+		add_child(avatar)
+		remote_players[peer_id] = avatar
+	avatar.global_position = position
+	avatar.rotation.y = yaw
+
+func _broadcast_coop_state() -> void:
+	if multiplayer.multiplayer_peer == null:
+		return
+	var state := {
+		"collected": collected_info,
+		"delivered": info_delivered,
+		"interviewed": interviewed_npcs.keys(),
+		"informed": informed_npcs.keys(),
+		"cheered": cheered_npcs.keys(),
+		"moods": npc_targets.map(func(npc_state: Dictionary) -> float: return float(npc_state.mood)),
+		"verified": journalist_verified,
+		"influencer_has_information": influencer_has_information
+	}
+	rpc("_receive_coop_state", state)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _receive_coop_state(state: Dictionary) -> void:
+	for key in (state.get("collected", {}) as Dictionary):
+		if not collected_info.has(key):
+			collected_info[key] = state.collected[key]
+			if int(key) >= 0 and int(key) < info_chests.size():
+				_open_chest_visual(info_chests[int(key)].node as Node3D)
+	info_delivered = info_delivered or bool(state.get("delivered", false))
+	journalist_verified = journalist_verified or bool(state.get("verified", false))
+	influencer_has_information = influencer_has_information or bool(state.get("influencer_has_information", false))
+	for index in state.get("interviewed", []):
+		interviewed_npcs[index] = true
+	for index in state.get("informed", []):
+		informed_npcs[index] = true
+	for index in state.get("cheered", []):
+		cheered_npcs[index] = true
+	var shared_moods: Array = state.get("moods", [])
+	for index in range(mini(shared_moods.size(), npc_targets.size())):
+		var npc_state: Dictionary = npc_targets[index]
+		if float(shared_moods[index]) > float(npc_state.mood):
+			npc_state.mood = float(shared_moods[index])
+			npc_state.seconds_left = npc_mood_duration * float(npc_state.mood)
+			npc_state.recharging = false
+			npc_targets[index] = npc_state
+	_update_information_hud()
+
+func _exit_network_game() -> void:
+	multiplayer.multiplayer_peer = null
+	is_network_host = false
+	is_solo_mode = true
+	network_peer_ids.clear()
+	role_assignments = ROLE_MANAGER.assign_roles(1)
+	local_roles = role_assignments[0]
+	active_role_index = 0
+	active_role = String(local_roles[0])
+	network_status.text = "Modo solitario activo."
+	_update_role_ui()
+	_update_information_hud()
+
+func _update_nearest_station() -> void:
+	if panel != null and panel.visible:
+		prompt.text = "E  ·  Cerrar"
+		return
+	var target := _nearest_interaction_target()
+	if target.is_empty():
+		prompt.text = ""
+		return
+	match String(target.kind):
+		"chest":
+			var index: int = target.index
+			if active_role != "Ciudadano":
+				prompt.text = "Solo el Héroe puede recoger fichas"
+			else:
+				prompt.text = "E  ·  Abrir cofre y recoger información" if not collected_info.has(index) else "E  ·  Revisar información recogida"
+		"ticket":
+			if active_role == "Ciudadano":
+				prompt.text = "E  ·  Entregar información en la taquilla" if collected_info.size() == info_chests.size() else "Recoge todas las fichas antes de entregarlas"
+			elif active_role == "Periodista":
+				prompt.text = "E  ·  Verificar la información" if info_delivered and interviewed_npcs.size() == npc_targets.size() and not journalist_verified else "Mensajero: entrevista al público y espera la entrega"
+			else:
+				prompt.text = "Esta taquilla corresponde al Héroe y al Mensajero"
+		"roulette": prompt.text = "Ruleta usada esta partida" if roulette_used else "E  ·  Girar ruleta (una vez por partida)"
+		"npc":
+			var state: Dictionary = npc_targets[int(target.npc_index)]
+			var mood_percent := roundi(float(state.mood) * 100.0)
+			match active_role:
+				"Periodista": prompt.text = "Entrevista lista · " + String(target.name) if interviewed_npcs.has(target.npc_index) else "E  ·  Hablar y resolver acertijo con " + String(target.name)
+				"Influencer":
+					if not influencer_has_information:
+						prompt.text = "Espera %d s" % ceili(float(bard_cooldowns.get(int(target.npc_index), 0.0))) if float(bard_cooldowns.get(int(target.npc_index), 0.0)) > 0.0 else "E  ·  Animar un poco a " + String(target.name)
+					elif informed_npcs.has(target.npc_index):
+						prompt.text = "Información entregada · " + String(target.name)
+					elif int(target.npc_index) == informed_npcs.size():
+						prompt.text = "E  ·  Entregar información a " + String(target.name)
+					else:
+						prompt.text = "Entrega primero al siguiente vecino"
+				"Candidato a alcalde": prompt.text = "Ánimo recargando · %d%%" % mood_percent if state.recharging else "E  ·  Animar a " + String(target.name) + "  ·  Ánimo %d%%" % mood_percent
+				_: prompt.text = "El Héroe no tiene una acción con este vecino"
+
+func _nearest_interaction_target() -> Dictionary:
+	var nearest: Dictionary = {}
+	var best := 3.5
+	for i in range(info_chests.size()):
+		var chest_pos: Vector3 = info_chests[i].position
+		var distance := player.global_position.distance_to(chest_pos)
+		if distance < best:
+			best = distance
+			nearest = {"kind":"chest", "index":i}
+	if ticket_machine_position.x > -1000:
+		var machine_distance := player.global_position.distance_to(ticket_machine_position)
+		if machine_distance < best:
+			best = machine_distance
+			nearest = {"kind":"ticket"}
+	if roulette_position.x > -1000:
+		var roulette_distance := player.global_position.distance_to(roulette_position)
+		if roulette_distance < roulette_interaction_range and (nearest.is_empty() or roulette_distance < best):
+			best = roulette_distance
+			nearest = {"kind":"roulette"}
+	for i in range(npc_targets.size()):
+		var npc: Dictionary = npc_targets[i]
+		var npc_position: Vector3 = npc.position
+		var distance := player.global_position.distance_to(npc_position)
+		if distance < best:
+			best = distance
+			nearest = {"kind":"npc", "name":npc.name, "node":npc.node, "npc_index":i}
+	return nearest
+
+func _open_nearest_station() -> void:
+	var target := _nearest_interaction_target()
+	if target.is_empty():
+		return
+	match String(target.kind):
+		"chest":
+			var index: int = target.index
+			if active_role != "Ciudadano":
+				panel_text.text = "Solo el Héroe puede recoger las fichas de información."
+			elif collected_info.has(index):
+				panel_text.text = "✦   INFORMACIÓN RECOGIDA\n\n" + String(collected_info[index]) + "\n\nLleva todas las fichas a la máquina de tickets. Pulsa E para cerrar."
+			else:
+				var clues := ["Comprueba quién publicó el dato y encuentra la fuente original antes de compartirlo.", "Revisa la fecha: una noticia antigua puede circular como si fuera actual.", "Pregunta a cuántas personas consultaron; una muestra pequeña no representa a todo el barrio.", "Compara las cifras con documentos públicos y revisa cómo se calcularon.", "Una propuesta necesita plan, responsables y presupuesto para poder evaluarse."]
+				var clue := String(clues[index % clues.size()])
+				collected_info[index] = clue
+				_save_opened_chest(index)
+				_open_chest_visual(info_chests[index].node as Node3D)
+				_play_chest_open_sound(info_chests[index].node as Node3D)
+				answered = collected_info.size()
+				var progress := "\n\nFichas recogidas: %d / %d." % [collected_info.size(), info_chests.size()]
+				if collected_info.size() == info_chests.size():
+					progress += "\nYa tienes toda la información. Llévala a la máquina de tickets."
+				panel_text.text = "✦   FICHA DE INFORMACIÓN %d\n\n%s%s\n\nPulsa E para cerrar." % [index + 1, clue, progress]
+				_broadcast_coop_state()
+			_update_information_hud()
+		"ticket":
+			if active_role == "Ciudadano" and collected_info.size() < info_chests.size():
+				panel_text.text = "✦   MÁQUINA DE TICKETS\n\nTodavía faltan fichas por recoger.\nFichas: %d / %d\n\nBusca los cofres del mapa y vuelve cuando tengas toda la información." % [collected_info.size(), info_chests.size()]
+			elif active_role == "Ciudadano":
+				info_delivered = true
+				panel_text.text = "✓   INFORMACIÓN ENTREGADA\n\nLa máquina registró todas las fichas. Ya puedes revisar las fuentes, fechas y datos reunidos.\n\nEntrega completada: %d / %d fichas." % [collected_info.size(), info_chests.size()]
+				_update_information_hud()
+				_broadcast_coop_state()
+				_broadcast_coop_state()
+			elif active_role == "Periodista":
+				_start_journalist_verification()
+			else:
+				panel_text.text = "La taquilla la usan el Héroe para entregar fichas y el Mensajero para verificarlas."
+			_update_information_hud()
+		"roulette":
+			_use_roulette()
+		"npc":
+			var npc_index: int = target.npc_index
+			var npc_node := target.node as Node3D
+			match active_role:
+				"Periodista":
+					_interview_public(npc_index)
+				"Influencer":
+					_share_info_to_npc(npc_index)
+				"Candidato a alcalde":
+					if npc_targets[npc_index].recharging:
+						panel_text.text = "✦   " + String(target.name).replace("_", " ") + "\n\nSu ánimo se está recargando. Espera a que termine para volver a animarlo."
+					else:
+						_cheer_npc(npc_index)
+						panel_text.text = "✦   " + String(target.name).replace("_", " ") + "\n\n¡Lo animaste! Su barra volverá a llenarse y bajará en %d segundos." % int(npc_mood_duration)
+				_:
+					panel_text.text = "El Héroe se encarga de reunir y entregar la información."
+			panel_text.text += "\n\nPulsa E para cerrar."
+			_update_information_hud()
+	panel.visible = true
+
+func _update_information_hud() -> void:
+	if hud == null:
+		return
+	var status := "Fichas %d / %d    ·    Vecinos %d / %d" % [collected_info.size(), info_chests.size(), informed_npcs.size(), npc_targets.size()]
+	if is_solo_mode:
+		status += "\n%s  ·  %s" % [_role_display_name(active_role), _role_mission(active_role)]
+	else:
+		var missions: Array[String] = []
+		for role in local_roles:
+			missions.append("%s: %s" % [_role_display_name(String(role)), _role_mission(String(role))])
+		status += "\n" + "   ·   ".join(PackedStringArray(missions))
+	hud.text = status
+	_check_game_completion()
+
+func _interview_public(npc_index: int) -> void:
+	if interviewed_npcs.has(npc_index):
+		panel_text.text = "La entrevista ya quedó registrada. Sigue hablando con los demás vecinos."
+		return
+	journalist_puzzle_npc = npc_index
+	journalist_puzzle_sequence.clear()
+	journalist_puzzle_input.clear()
+	for _step in range(3):
+		journalist_puzzle_sequence.append(randi_range(1, 3))
+	_show_interview_puzzle()
+
+func _show_interview_puzzle() -> void:
+	var npc_name: String = String(npc_targets[journalist_puzzle_npc].name).replace("_", " ")
+	var code := " · ".join(PackedStringArray(journalist_puzzle_sequence.map(func(value: int) -> String: return str(value))))
+	panel_text.text = "ENTREVISTA · %s\n\nEl vecino te dicta una clave de tres señales. Repítela en el mismo orden con las teclas 1, 2 y 3.\n\nClave: %s\nTu secuencia: %s\n\nPulsa las tres teclas para completar la entrevista." % [npc_name, code, " · ".join(PackedStringArray(journalist_puzzle_input.map(func(value: int) -> String: return str(value))))]
+
+func _answer_interview_puzzle(signal_number: int) -> void:
+	if journalist_puzzle_npc < 0:
+		return
+	journalist_puzzle_input.append(signal_number)
+	var step := journalist_puzzle_input.size() - 1
+	if journalist_puzzle_input[step] != journalist_puzzle_sequence[step]:
+		journalist_puzzle_input.clear()
+		panel_text.text = "La clave no coincidió. La entrevista sigue abierta. Inténtalo de nuevo:\n\n"
+		_show_interview_puzzle()
+		return
+	if journalist_puzzle_input.size() < journalist_puzzle_sequence.size():
+		_show_interview_puzzle()
+		return
+	var npc_index := journalist_puzzle_npc
+	journalist_puzzle_npc = -1
+	interviewed_npcs[npc_index] = true
+	var npc_name: String = String(npc_targets[npc_index].name).replace("_", " ")
+	panel_text.text = "ENTREVISTA COMPLETADA · %s\n\nResolviste la clave y registraste su testimonio. Entrevistas: %d / %d.\n\nPuedes continuar con otro vecino mientras el Héroe recoge las fichas." % [npc_name, interviewed_npcs.size(), npc_targets.size()]
+	if interviewed_npcs.size() == npc_targets.size():
+		panel_text.text += "\n\nCuando el Héroe entregue todos los cofres, ve a la taquilla para verificar la información."
+	_update_information_hud()
+	_broadcast_coop_state()
+
+func _start_journalist_verification() -> void:
+	if journalist_verified:
+		panel_text.text = "La información ya fue verificada y está lista para el Bardo."
+		return
+	if not info_delivered:
+		panel_text.text = "El Héroe todavía no ha entregado las fichas."
+		return
+	if interviewed_npcs.size() < npc_targets.size():
+		panel_text.text = "Antes de revisar la información, entrevista a todos los vecinos. Entrevistas: %d / %d." % [interviewed_npcs.size(), npc_targets.size()]
+		return
+	journalist_results.clear()
+	journalist_claim_index = 0
+	_show_journalist_claim()
+
+func _show_journalist_claim() -> void:
+	if journalist_claim_index >= journalist_claims.size():
+		journalist_claim_index = -1
+		journalist_verified = true
+		influencer_has_information = true
+		var handoff: String
+		if is_solo_mode:
+			handoff = "En solitario, la información pasó automáticamente al Bardo. Cuando quieras, cambia manualmente a ese rol para repartirla a los vecinos, uno por uno."
+		else:
+			handoff = "La información se entregó al Bardo. Ahora debe compartirla con los vecinos, uno por uno."
+		panel_text.text = "✓   VERIFICACIÓN COMPLETADA\n\nResultados que decidiste:\n%s\n\n%s" % ["\n".join(journalist_results), handoff]
+		_update_information_hud()
+		_broadcast_coop_state()
+		return
+	var claim: Dictionary = journalist_claims[journalist_claim_index]
+	var previous_results := ""
+	if not journalist_results.is_empty():
+		previous_results = "Tus resultados hasta ahora:\n" + "\n".join(journalist_results) + "\n\n"
+	panel_text.text = "PUZZLE DE VERIFICACIÓN · %d / %d\n\n%sEvalúa las fuentes y decide: ¿es verdadera o falsa?\n\n%s\n\nPulsa 1 para VERDADERA o 2 para FALSA." % [journalist_claim_index + 1, journalist_claims.size(), previous_results, String(claim.statement)]
+
+func _answer_journalist_claim(answer_is_true: bool) -> void:
+	if journalist_claim_index < 0 or journalist_claim_index >= journalist_claims.size():
+		return
+	var claim: Dictionary = journalist_claims[journalist_claim_index]
+	if answer_is_true != bool(claim.is_true):
+		panel_text.text = "Esa decisión contradice las fuentes reunidas. Vuelve a revisar la afirmación y elige de nuevo.\n\n%s" % String(claim.statement)
+		return
+	journalist_results.append("Dato %d: %s" % [journalist_claim_index + 1, "VERDADERO" if answer_is_true else "FALSO"])
+	journalist_claim_index += 1
+	_show_journalist_claim()
+
+func _share_info_to_npc(npc_index: int) -> void:
+	if not influencer_has_information:
+		if float(bard_cooldowns.get(npc_index, 0.0)) <= 0.0:
+			_cheer_npc(npc_index, 1.0 / 3.0)
+			panel_text.text = "El Bardo elevó un tercio el ánimo del vecino mientras espera los datos del Mensajero."
+		else:
+			panel_text.text = "El vecino escucha la canción. Espera un momento para animarlo de nuevo."
+		return
+	if informed_npcs.has(npc_index):
+		panel_text.text = "Este vecino ya recibió la información verificada."
+		return
+	if npc_index != informed_npcs.size():
+		panel_text.text = "Entrega la información al siguiente vecino de la fila antes de continuar."
+		return
+	informed_npcs[npc_index] = true
+	var npc_name: String = String(npc_targets[npc_index].name).replace("_", " ")
+	panel_text.text = "MENSAJE COMPARTIDO · %s\n\nCompartiste con el vecino información revisada por el Mensajero. También puedes comunicarla a tus compañeros." % npc_name
+	_update_information_hud()
+	_broadcast_coop_state()
+
+func _open_chest_visual(chest: Node3D) -> void:
+	if chest == null:
+		return
+	var players := chest.find_children("*", "AnimationPlayer", true, false)
+	for player_node in players:
+		var animator := player_node as AnimationPlayer
+		for animation_name in animator.get_animation_list():
+			if String(animation_name).to_lower().contains("open"):
+				animator.play(String(animation_name))
+				return
+
+func _play_chest_open_sound(chest: Node3D) -> void:
+	if chest == null or chest_open_stream == null:
+		return
+	var sound := chest.get_node_or_null("ChestOpenSoundPlayer") as AudioStreamPlayer3D
+	if sound == null:
+		sound = AudioStreamPlayer3D.new()
+		sound.name = "ChestOpenSoundPlayer"
+		sound.stream = chest_open_stream
+		sound.volume_db = -8.0
+		sound.unit_size = 3.0
+		sound.max_distance = 14.0
+		chest.add_child(sound)
+	sound.play()
+
+func _load_chest_open_sound() -> void:
+	var file := FileAccess.open(CHEST_OPEN_SOUND_PATH, FileAccess.READ)
+	if file == null or file.get_length() <= 44:
+		push_warning("No pude cargar el sonido de apertura del cofre.")
+		return
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = 22050
+	stream.stereo = false
+	file.seek(44)
+	stream.data = file.get_buffer(file.get_length() - 44)
+	chest_open_stream = stream
+
+func _close_chest_visual(chest: Node3D) -> void:
+	if chest == null:
+		return
+	for player_node in chest.find_children("*", "AnimationPlayer", true, false):
+		var animator := player_node as AnimationPlayer
+		for animation_name in animator.get_animation_list():
+			var animation_key := String(animation_name).to_lower()
+			if animation_key.contains("close"):
+				animator.play(String(animation_name))
+				return
+			if animation_key.contains("open"):
+				animator.play(String(animation_name))
+				animator.seek(0.0, true)
+				animator.pause()
+				return
+
+func _use_roulette() -> void:
+	if roulette_used:
+		panel_text.text = "La ruleta ya se usó en esta partida. Vuelve a girarla cuando empieces una nueva.\n\nPulsa E para cerrar."
+		return
+	roulette_used = true
+	if is_instance_valid(roulette_node):
+		for player_node in roulette_node.find_children("*", "AnimationPlayer", true, false):
+			var animator := player_node as AnimationPlayer
+			for animation_name in animator.get_animation_list():
+				var animation_key := String(animation_name).to_lower()
+				if animation_key.contains("spin") or animation_key.contains("rotate"):
+					animator.play(String(animation_name))
+					break
+	var reward := randi_range(0, 2)
+	match reward:
+		0:
+			npc_mood_duration = 40.0
+			for i in range(npc_targets.size()):
+				var state: Dictionary = npc_targets[i]
+				state.seconds_left = minf(float(state.seconds_left), npc_mood_duration)
+				state.mood = float(state.seconds_left) / npc_mood_duration
+				npc_targets[i] = state
+			panel_text.text = "La ruleta aceleró el desgaste del ánimo. Las barras de los guardias ahora duran 40 segundos.\n\nPulsa E para cerrar."
+		1:
+			collected_info.clear()
+			info_delivered = false
+			for chest_info in info_chests:
+				_close_chest_visual(chest_info.node as Node3D)
+			_update_information_hud()
+			_broadcast_coop_state()
+			panel_text.text = "La ruleta reinició los cofres. Tendrás que abrirlos otra vez y llevar la información a la máquina de tickets.\n\nPulsa E para cerrar."
+		2:
+			speed_boost_time = 60.0
+			if is_instance_valid(player):
+				player.set("speed", 9.0)
+			_update_information_hud()
+			_broadcast_coop_state()
+			panel_text.text = "¡Impulso de velocidad! Te moverás más rápido durante un minuto.\n\nPulsa E para cerrar."
+
+func _update_speed_boost(delta: float) -> void:
+	if speed_boost_time <= 0.0:
+		return
+	var previous_seconds := ceili(speed_boost_time)
+	speed_boost_time = maxf(speed_boost_time - delta, 0.0)
+	if speed_boost_time <= 0.0 and is_instance_valid(player):
+		player.set("speed", 6.0)
+	if ceili(speed_boost_time) != previous_seconds:
+		_update_information_hud()
+
+func _answer(choice: int) -> void:
+	var q: Dictionary = questions[question_index]
+	var correct: bool = choice == q.correct
+	if correct:
+		answered += 1
+	var outcome := "✓ Buena decisión. " if correct else "✧ Puedes volver a pensar la decisión. "
+	panel_text.text = outcome + q.fact + "\n\nProgreso: %d / %d estaciones resueltas.\n\nPulsa E para continuar." % [answered, stations.size()]
+	hud.text = "◆ Ciudadanía: %d / 3     ◆ Confianza: %d%%" % [answered, 100 if correct else max(70, 100 - (question_index + 1) * 6)]
+	question_index = -1
+
+func _close_question() -> void:
+	panel.visible = false
+	question_index = -1
+
+func _add_model(path: String, at: Vector3, model_scale: Vector3, parent: Node, collidable := false, rotation_y := 0.0) -> Node3D:
+	if not ResourceLoader.exists(path):
+		return null
+	var node: Node3D = load(path).instantiate()
+	node.position = at
+	node.scale = model_scale
+	node.rotation.y = rotation_y
+	parent.add_child(node)
+	if collidable:
+		_add_mesh_collisions(node)
+	return node
+
+func _add_mesh_collisions(root: Node3D) -> void:
+	var meshes := root.find_children("*", "MeshInstance3D", true, false)
+	if meshes.is_empty():
+		return
+	var body := StaticBody3D.new()
+	body.name = "AssetMeshCollision"
+	root.add_child(body)
+	var root_inverse := root.global_transform.affine_inverse()
+	for node in meshes:
+		var mesh_instance := node as MeshInstance3D
+		if mesh_instance.mesh == null:
+			continue
+		var shape := mesh_instance.mesh.create_trimesh_shape()
+		if shape == null:
+			continue
+		var collision := CollisionShape3D.new()
+		collision.shape = shape
+		collision.transform = root_inverse * mesh_instance.global_transform
+		body.add_child(collision)
+
+func _add_box(node_name: String, at: Vector3, size: Vector3, color: Color, solid: bool, visible_mesh := true) -> void:
+	var body := StaticBody3D.new() if solid else Node3D.new()
+	body.name = node_name
+	body.position = at
+	if visible_mesh:
+		var mesh_instance := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = size
+		var material := StandardMaterial3D.new()
+		material.albedo_color = color
+		material.roughness = 0.82
+		box.material = material
+		mesh_instance.mesh = box
+		body.add_child(mesh_instance)
+	if solid:
+		var collision := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = size
+		collision.shape = shape
+		body.add_child(collision)
+	add_child(body)
+
+func _add_glow_marker(at: Vector3) -> void:
+	var marker := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.18
+	mesh.height = 0.36
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color("69f0df")
+	mat.emission_enabled = true
+	mat.emission = Color("20e8d1")
+	mat.emission_energy_multiplier = 3.0
+	mesh.material = mat
+	marker.mesh = mesh
+	marker.position = at
+	add_child(marker)
+	var light := OmniLight3D.new()
+	light.position = at
+	light.light_color = Color("62e9da")
+	light.light_energy = 0.8
+	light.omni_range = 5
+	add_child(light)
+
+func _style_panel(target: PanelContainer, background: Color, border: Color) -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = background
+	style.border_color = border
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(9)
+	style.content_margin_left = 12
+	style.content_margin_right = 12
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
+	target.add_theme_stylebox_override("panel", style)

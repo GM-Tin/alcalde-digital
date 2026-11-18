@@ -7,6 +7,7 @@ venv/
 dist/
 build/
 work/
+.godot/
 
 # Packs externos: requieren descarga manual según licencia
 assets/vendor/
