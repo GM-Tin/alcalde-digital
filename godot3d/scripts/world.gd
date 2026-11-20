@@ -10,11 +10,14 @@ const CHARACTERS := "res://assets/kenney/characters/Models/GLB format/"
 const ZONE_LENGTH := 72.0
 const ZONE_WIDTH := 30.0
 const WORLD_LENGTH := ZONE_LENGTH * 3.0
-const MAP_SCALE := 1.5
-const MAX_INFO_CHESTS := 10
+const MAP_SCALE := 1.8
+const WORLD_VISIBILITY_DISTANCE := 145.0
+const WORLD_VISIBILITY_FADE := 18.0
+const FIREFLY_UPDATE_INTERVAL := 1.0 / 30.0
+const REQUIRED_INFO_CHESTS := 10
 const MAX_COOP_PLAYERS := 4
 const COOP_PORT := 7777
-const NPC_MOOD_DURATION := 80.0
+const NPC_MOOD_DURATION := 90.0
 const NPC_MOOD_RECHARGE_DURATION := 2.5
 const BARD_CHEER_RECHARGE_DURATION := NPC_MOOD_RECHARGE_DURATION
 const BARD_CHEER_HOLD_DURATION := 8.0
@@ -28,7 +31,22 @@ const CARTOON_FONT: FontFile = preload("res://assets/ui/fonts/LilitaOne-Regular.
 const CHEST_PROGRESS_PATH := "user://chest_progress.cfg"
 const DAY_PHASE_DURATION := 240.0
 const CHEST_OPEN_SOUND_PATH := "res://assets/audio/chest_open.wav"
+const CHEST_NEAR_SOUND_PATH := "res://assets/audio/chest_near.mp3"
+const CHEST_PROXIMITY_RANGE := 8.0
 const ROLE_MANAGER := preload("res://scripts/role_manager.gd")
+const JOURNALIST_CLAIMS := [
+	{"statement":"La alerta del cierre del centro comunitario incluye una fuente oficial verificable.", "is_true":false},
+	{"statement":"La jornada de limpieza aparece en el calendario publicado por la alcaldía.", "is_true":true},
+	{"statement":"Una encuesta de tres personas basta para representar a todo el reino.", "is_true":false},
+	{"statement":"El debate municipal tiene fecha y hora confirmadas en el portal oficial.", "is_true":true},
+	{"statement":"Una captura recortada demuestra por sí sola que un candidato cerrará el parque.", "is_true":false},
+	{"statement":"La propuesta de reparación publica responsables y presupuesto.", "is_true":true},
+	{"statement":"La cifra compartida coincide con el informe público original.", "is_true":true},
+	{"statement":"Un mensaje anónimo confirma que el alcalde robó fondos.", "is_true":false},
+	{"statement":"La noticia viral conserva su fecha original y no está desactualizada.", "is_true":true},
+	{"statement":"El acta electoral confirma el lugar y la hora de la votación.", "is_true":true}
+]
+var journalist_claims: Array = JOURNALIST_CLAIMS.duplicate(true)
 
 var player: CharacterBody3D
 var camera: Camera3D
@@ -67,23 +85,32 @@ var journalist_puzzle_npc := -1
 var journalist_puzzle_sequence: Array[int] = []
 var journalist_puzzle_input: Array[int] = []
 var journalist_claim_index := -1
+var journalist_puzzle_stage := ""
+var journalist_puzzle_correct_option := 1
+var journalist_minigame_kind := 0
+var journalist_minigame_sequence: Array[int] = []
+var journalist_minigame_input: Array[int] = []
 var journalist_results: Array[String] = []
+var journalist_correct_classifications := 0
+var journalist_rejected_false_count := 0
+var journalist_validated_info: Array[int] = []
 var journalist_verified := false
 var influencer_has_information := false
-var journalist_claims := [
-	{"statement":"Un mensaje sin fuente demuestra que el centro comunitario va a cerrar.", "is_true":false},
-	{"statement":"Una encuesta hecha a tres amigos representa a todo el barrio.", "is_true":false},
-	{"statement":"Antes de compartir una cifra hay que revisar su fecha y su fuente original.", "is_true":true}
-]
+var influencer_delivery_queue: Array[Dictionary] = []
+var influencer_delivery_cursor := 0
+var shared_info_by_npc: Dictionary = {}
+var final_classification_summary := ""
 var stations: Array[Dictionary] = []
 var info_chests: Array[Dictionary] = []
 var npc_targets: Array[Dictionary] = []
 var npc_night_lights: Array[OmniLight3D] = []
 var chest_lights: Array[OmniLight3D] = []
+var chest_proximity_players: Array[Dictionary] = []
 var firefly_nodes: Array[Node3D] = []
 var firefly_lights: Array[OmniLight3D] = []
 var firefly_orbs: Array[MeshInstance3D] = []
 var firefly_time := 0.0
+var firefly_update_accumulator := 0.0
 var ticket_machine_position := Vector3(-10000, 0, 0)
 var roulette_position := Vector3(-10000, 0, 0)
 var roulette_interaction_range := 6.0
@@ -132,12 +159,16 @@ var random_room_code := ""
 var game_timer_timeout := false
 var last_defeat_cause := "timeout"
 var speed_boost_time := 0.0
+var water_respawn_pending := false
+var permanent_spawn_position := Vector3.ZERO
+var permanent_spawn_position_set := false
 var sun_light: DirectionalLight3D
 var day_environment: Environment
 var day_sky: ShaderMaterial
 var day_cycle_elapsed := 0.0
 var day_phase_presets: Array[Dictionary] = []
 var chest_open_stream: AudioStreamWAV
+var chest_near_stream: AudioStreamMP3
 var collected_info: Dictionary = {}
 var info_delivered := false
 var questions := [
@@ -156,6 +187,8 @@ func _ready() -> void:
 		# Some placed Kenney structures were missing physics bodies. Repair only
 		# imported asset instances without a collider, preserving the edited layout.
 		_repair_asset_collisions(self)
+		_build_environment_dressing()
+		_build_editor_npcs()
 		return
 	_build_loading_screen()
 	await get_tree().process_frame
@@ -165,10 +198,13 @@ func _ready() -> void:
 	local_roles = role_assignments[0]
 	active_role = String(local_roles[active_role_index])
 	_repair_asset_collisions(self)
+	_build_environment_dressing()
 	_scale_map_up()
+	_optimize_static_visuals()
 	# Let the physics server register saved geometry before placing guards on clear ground.
 	await get_tree().physics_frame
 	_setup_npcs()
+	_load_chest_open_sound()
 	_discover_information_chests()
 	_find_ticket_machine()
 	_find_roulette()
@@ -176,7 +212,6 @@ func _ready() -> void:
 	_setup_fireflies()
 	lights_enabled = _load_setting_bool("lights_enabled", true)
 	_on_lights_toggled(lights_enabled)
-	_load_chest_open_sound()
 	_build_player()
 	_build_ui()
 	lights_enabled = _load_setting_bool("lights_enabled", true)
@@ -215,6 +250,28 @@ func _scale_map_up() -> void:
 		map_object.global_transform = transform
 	set_meta("expanded_map_applied", true)
 
+func _optimize_static_visuals() -> void:
+	# The three districts contain thousands of low-poly mesh nodes. Keep the
+	# nearby gameplay area sharp and fade distant meshes before they flood the
+	# integrated GPU with unnecessary draw calls.
+	for candidate in find_children("*", "MeshInstance3D", true, false):
+		var mesh_instance := candidate as MeshInstance3D
+		if mesh_instance == null or mesh_instance.mesh == null:
+			continue
+		mesh_instance.visibility_range_end = WORLD_VISIBILITY_DISTANCE
+		mesh_instance.visibility_range_end_margin = WORLD_VISIBILITY_FADE
+		mesh_instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+
+func _absolute_transform(node: Node3D) -> Transform3D:
+	# global_transform logs an engine error when editor-added assets are repaired
+	# before entering the active tree. Compose local transforms safely instead.
+	var result := node.transform
+	var ancestor := node.get_parent()
+	while ancestor is Node3D:
+		result = (ancestor as Node3D).transform * result
+		ancestor = ancestor.get_parent()
+	return result
+
 func _is_chest_instance(node: Node3D) -> bool:
 	return node.scene_file_path.to_lower().contains("chest.glb") or node.name.to_lower().contains("chest")
 
@@ -238,6 +295,8 @@ func _repair_asset_collisions(node: Node) -> void:
 			_add_stair_ramp_collision(child as Node3D)
 			continue
 		if child is StaticBody3D and (child.name.to_lower().contains("floor") or child.name == "DioramaBase"):
+			# Restore the saved walkable floor supports. The previous zero collision
+			# layer let the player fall through the map even where a floor was visible.
 			child.collision_layer = 1
 			child.collision_mask = 1
 		# Many barrels in the editable scene are loose MeshInstance3D nodes, not
@@ -315,7 +374,9 @@ func _add_fitted_object_collider(graphic: MeshInstance3D, cylindrical: bool, suf
 	# graphic. The previous child collider inherited extreme mesh scales, which
 	# can make it appear present while the physics body fails to block the player.
 	var local_bounds := graphic.mesh.get_aabb()
-	var world_bounds: AABB = graphic.global_transform * local_bounds
+	var graphic_to_world := _absolute_transform(graphic)
+	var parent_to_world := _absolute_transform(parent_node as Node3D)
+	var world_bounds: AABB = graphic_to_world * local_bounds
 	if world_bounds.size.x < 0.03 or world_bounds.size.y < 0.03 or world_bounds.size.z < 0.03:
 		return
 	var body := StaticBody3D.new()
@@ -323,7 +384,7 @@ func _add_fitted_object_collider(graphic: MeshInstance3D, cylindrical: bool, suf
 	body.collision_layer = 1
 	body.collision_mask = 1
 	parent_node.add_child(body)
-	body.global_transform = Transform3D(Basis.IDENTITY, world_bounds.get_center())
+	body.transform = parent_to_world.affine_inverse() * Transform3D(Basis.IDENTITY, world_bounds.get_center())
 	var collision := CollisionShape3D.new()
 	if cylindrical:
 		var cylinder := CylinderShape3D.new()
@@ -391,19 +452,21 @@ func _add_convex_object_collision(graphic: MeshInstance3D) -> void:
 	var convex := graphic.mesh.create_convex_shape()
 	if convex == null or convex.points.size() < 4:
 		return
-	var world_bounds: AABB = graphic.global_transform * graphic.mesh.get_aabb()
+	var graphic_to_world := _absolute_transform(graphic)
+	var parent_to_world := _absolute_transform(parent_node as Node3D)
+	var world_bounds: AABB = graphic_to_world * graphic.mesh.get_aabb()
 	var center := world_bounds.get_center()
 	var world_points := PackedVector3Array()
 	world_points.resize(convex.points.size())
 	for i in range(convex.points.size()):
-		world_points[i] = graphic.global_transform * convex.points[i] - center
+		world_points[i] = graphic_to_world * convex.points[i] - center
 	convex.points = world_points
 	var body := StaticBody3D.new()
 	body.name = body_name
 	body.collision_layer = 1
 	body.collision_mask = 1
 	parent_node.add_child(body)
-	body.global_transform = Transform3D(Basis.IDENTITY, center)
+	body.transform = parent_to_world.affine_inverse() * Transform3D(Basis.IDENTITY, center)
 	var collision := CollisionShape3D.new()
 	collision.shape = convex
 	body.add_child(collision)
@@ -488,12 +551,15 @@ func _process(delta: float) -> void:
 		_update_speed_boost(delta)
 		_update_day_night_cycle(delta)
 		_animate_fireflies(delta)
+		_update_chest_proximity_audio()
 		_update_nearest_station()
 		game_time_remaining = maxf(0.0, game_time_remaining - delta)
 		_update_timer_hud()
 		if game_time_remaining <= 0.0 and not game_timer_timeout:
 			game_timer_timeout = true
 			_end_game(false)
+	else:
+		_stop_all_chest_proximity_sounds()
 	if multiplayer.multiplayer_peer != null and player != null:
 		network_sync_elapsed += delta
 		if network_sync_elapsed >= 0.08:
@@ -514,12 +580,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 	if journalist_claim_index >= 0 and event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_1:
-			_answer_journalist_claim(true)
-			get_viewport().set_input_as_handled()
-			return
-		if event.keycode == KEY_2:
-			_answer_journalist_claim(false)
+		if journalist_puzzle_stage == "result":
+			if event.keycode >= KEY_1 and event.keycode <= KEY_3:
+				get_viewport().set_input_as_handled()
+				return
+		if event.keycode >= KEY_1 and event.keycode <= KEY_3:
+			var journalist_choice := int(event.keycode - KEY_0)
+			if journalist_puzzle_stage != "classify" or journalist_choice <= 2:
+				_answer_journalist_claim(journalist_choice)
 			get_viewport().set_input_as_handled()
 			return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F1:
@@ -588,7 +656,9 @@ func _build_world() -> void:
 	]
 	for i in range(stations.size()):
 		var st: Dictionary = stations[i]
-		_add_model(st.model, st.position, Vector3(2.5, 2.5, 2.5), self, true)
+		var station_model := _add_model(st.model, st.position, Vector3(2.5, 2.5, 2.5), self, true)
+		if station_model != null and String(st.model).to_lower().contains("chest.glb"):
+			station_model.set_meta("non_information_chest", true)
 		_add_glow_marker(st.position + Vector3(0, 1.8, 0))
 		st["question"] = i
 		stations[i] = st
@@ -597,6 +667,61 @@ func _build_world() -> void:
 	_add_box("WorldStartBoundary", Vector3(-2.0, 1.0, 0), Vector3(0.5, 2, ZONE_WIDTH), Color.BLACK, true, false)
 	_add_box("WorldEndBoundary", Vector3(WORLD_LENGTH + 2.0, 1.0, 0), Vector3(0.5, 2, ZONE_WIDTH), Color.BLACK, true, false)
 
+func _npc_specs() -> Array[Dictionary]:
+	return [
+		{"name":"Guardia_01", "position":Vector3(8.0, 0, 0), "dialogue":"Busca quién publicó el dato y comprueba la fuente original."},
+		{"name":"Guardia_02", "position":Vector3(19.0, 0, 0), "dialogue":"Revisa la fecha para saber si la información sigue vigente."},
+		{"name":"Guardia_03", "position":Vector3(30.0, 0, 0), "dialogue":"Compara las cifras con documentos públicos."},
+		{"name":"Guardia_04", "position":Vector3(43.0, 0, 6.0), "dialogue":"Pregunta cuántas personas participaron en la encuesta."},
+		{"name":"Guardia_05", "position":Vector3(58.0, 0, 0), "dialogue":"Cuando reúnas las fichas de todos los cofres, llévalas a la máquina de tickets."}
+	]
+
+func _build_editor_npcs() -> void:
+	var scene_root := get_tree().edited_scene_root
+	if scene_root == null:
+		return
+	for spec in _npc_specs():
+		var npc_name := String(spec.name)
+		var npc := get_node_or_null(NodePath(npc_name)) as Node3D
+		if npc == null:
+			npc = _add_model(CHARACTERS + "character-knight.glb", spec.position, Vector3(1.55, 1.55, 1.55), self)
+			if npc == null:
+				push_warning("No pude cargar el guardia editable " + npc_name)
+				continue
+			npc.name = npc_name
+			npc.rotation.y = -PI * 0.5
+			npc.set_meta("npc_dialogue", String(spec.dialogue))
+			_set_scene_owners(npc, scene_root)
+			npc.owner = scene_root
+		# Apply the standing idle pose to both knight rigs in the imported model.
+		# This changes only their skeleton pose; it never touches the editor position.
+		_play_guard_idle_animations(npc)
+
+func _play_guard_idle_animations(npc: Node3D) -> AnimationPlayer:
+	var primary_animator: AnimationPlayer = null
+	var animations := npc.find_children("*", "AnimationPlayer", true, false)
+	for candidate in animations:
+		var animator := candidate as AnimationPlayer
+		if animator == null:
+			continue
+		if primary_animator == null:
+			primary_animator = animator
+		var idle_name := ""
+		for animation_name in animator.get_animation_list():
+			if String(animation_name).to_lower().contains("idle"):
+				idle_name = String(animation_name)
+				break
+		if idle_name.is_empty() and not animator.get_animation_list().is_empty():
+			idle_name = String(animator.get_animation_list()[0])
+		if idle_name.is_empty():
+			continue
+		var idle_animation := animator.get_animation(idle_name)
+		if idle_animation != null:
+			idle_animation.loop_mode = Animation.LOOP_LINEAR
+		animator.play(idle_name)
+		animator.seek(0.0, true)
+	return primary_animator
+
 func _setup_npcs() -> void:
 	npc_targets.clear()
 	npc_night_lights.clear()
@@ -604,42 +729,29 @@ func _setup_npcs() -> void:
 		var existing_npc := candidate as Node3D
 		if existing_npc.scene_file_path.to_lower().contains("character-employee.glb") or existing_npc.name.to_lower().contains("character-employee"):
 			existing_npc.queue_free()
-	var npc_specs := [
-		{"name":"Guardia_01", "position":Vector3(8, 0, 0), "dialogue":"Busca quién publicó el dato y comprueba la fuente original."},
-		{"name":"Guardia_02", "position":Vector3(19, 0, 0), "dialogue":"Revisa la fecha para saber si la información sigue vigente."},
-		{"name":"Guardia_03", "position":Vector3(30, 0, 0), "dialogue":"Compara las cifras con documentos públicos."},
-		{"name":"Guardia_04", "position":Vector3(43, 0, 6), "dialogue":"Pregunta cuántas personas participaron en la encuesta."},
-		{"name":"Guardia_05", "position":Vector3(58, 0, 0), "dialogue":"Cuando reúnas todas las fichas, llévalas a la máquina de tickets."}
-	]
 	var reserved_positions: Array[Vector3] = []
+	var npc_specs := _npc_specs()
 	for i in range(npc_specs.size()):
 		var spec: Dictionary = npc_specs[i]
 		var npc_name := String(spec.name)
-		var desired_position: Vector3 = spec.position * MAP_SCALE
-		var safe_position := _find_clear_guard_position(desired_position, reserved_positions)
-		if safe_position.x < -900.0:
-			continue
-		reserved_positions.append(safe_position)
-		var npc := _add_model(CHARACTERS + "character-knight.glb", safe_position, Vector3(1.55, 1.55, 1.55), self)
+		var npc := get_node_or_null(NodePath(npc_name)) as Node3D
+		var safe_position: Vector3
+		if npc == null:
+			var desired_position: Vector3 = spec.position * MAP_SCALE
+			safe_position = _find_clear_guard_position(desired_position, reserved_positions)
+			if safe_position.x < -900.0:
+				continue
+			reserved_positions.append(safe_position)
+			npc = _add_model(CHARACTERS + "character-knight.glb", safe_position, Vector3(1.55, 1.55, 1.55), self)
 		if npc == null:
 			continue
+		if npc != null and not reserved_positions.has(npc.global_position):
+			reserved_positions.append(npc.global_position)
 		npc.name = npc_name
 		npc.rotation.y = -PI * 0.5
 		npc.set_meta("npc_dialogue", String(spec.dialogue))
 		_create_npc_night_light(npc)
-		var animations := npc.find_children("*", "AnimationPlayer", true, false)
-		var animator: AnimationPlayer = null
-		if not animations.is_empty():
-			animator = animations[0] as AnimationPlayer
-			var idle_name := ""
-			for animation_name in animator.get_animation_list():
-				if String(animation_name).to_lower().contains("idle"):
-					idle_name = String(animation_name)
-					break
-			if idle_name.is_empty() and not animator.get_animation_list().is_empty():
-				idle_name = animator.get_animation_list()[0]
-			if not idle_name.is_empty():
-				animator.play(idle_name)
+		var animator := _play_guard_idle_animations(npc)
 		var mood_bar := _create_npc_mood_bar(npc)
 		npc_targets.append({"node":npc, "position":npc.global_position, "name":npc_name, "mood":1.0, "seconds_left":npc_mood_duration, "recharging":false, "recharge_elapsed":0.0, "animator":animator, "bar":mood_bar, "index":i})
 
@@ -655,13 +767,7 @@ func _find_clear_guard_position(desired: Vector3, reserved_positions: Array[Vect
 			var z := desired.z + float(z_step) * 0.5
 			_append_clear_guard_candidate(candidates, space, capsule, x, z, desired, reserved_positions)
 	if candidates.is_empty():
-		# If a screenshot waypoint is obstructed, search the complete first-district
-		# walkable area for the nearest free place instead of spawning inside a wall.
-		for x_step in range(3, int(ZONE_LENGTH * MAP_SCALE * 2.0), 2):
-			for z_step in range(-int(ZONE_WIDTH * MAP_SCALE - 6.0), int(ZONE_WIDTH * MAP_SCALE - 6.0) + 1, 2):
-				_append_clear_guard_candidate(candidates, space, capsule, float(x_step) * 0.5, float(z_step) * 0.5, desired, reserved_positions)
-	if candidates.is_empty():
-		push_warning("No encontré suelo despejado para " + str(desired))
+		push_warning("No encontré suelo despejado en el claro del spawn para " + str(desired))
 		return Vector3(-1000, -1000, -1000)
 	candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.distance < b.distance)
 	return candidates[0].position
@@ -669,13 +775,13 @@ func _find_clear_guard_position(desired: Vector3, reserved_positions: Array[Vect
 func _append_clear_guard_candidate(candidates: Array[Dictionary], space: PhysicsDirectSpaceState3D, capsule: CapsuleShape3D, x: float, z: float, desired: Vector3, reserved_positions: Array[Vector3]) -> void:
 	if x < 1.5 or x > ZONE_LENGTH * MAP_SCALE - 1.5 or absf(z) > ZONE_WIDTH * MAP_SCALE * 0.5 - 3.5:
 		return
-	var ray := PhysicsRayQueryParameters3D.create(Vector3(x, 5.0, z), Vector3(x, -1.0, z))
+	var ray := PhysicsRayQueryParameters3D.create(Vector3(x, 8.0, z), Vector3(x, -1.0, z))
 	ray.collision_mask = 1
 	var ground := space.intersect_ray(ray)
 	if ground.is_empty():
 		return
 	var ground_y: float = ground.position.y
-	if ground_y < -0.2 or ground_y > 0.5:
+	if ground_y < -0.2 or ground_y > 3.3:
 		return
 	if not _spawn_capsule_is_clear(space, capsule, x, z, ground_y):
 		return
@@ -838,6 +944,7 @@ func _cheer_npc(npc_index: int, strength: float = 1.0) -> void:
 func _discover_information_chests() -> void:
 	info_chests.clear()
 	chest_lights.clear()
+	chest_proximity_players.clear()
 	var candidates := find_children("*", "Node3D", true, false)
 	for candidate in candidates:
 		var chest := candidate as Node3D
@@ -850,17 +957,76 @@ func _discover_information_chests() -> void:
 				has_chest_ancestor = true
 				break
 			ancestor = ancestor.get_parent()
-		if chest.get_meta("trap_chest", false):
+		if has_chest_ancestor:
+			continue
+		if path_is_chest or named_chest:
+			_setup_chest_proximity_sound(chest)
+		if chest.get_meta("non_information_chest", false):
+			continue
+		elif chest.get_meta("trap_chest", false):
 			_setup_chest_glow(chest)
-		elif (path_is_chest or (named_chest and not has_chest_ancestor)) and not has_chest_ancestor:
-			if info_chests.size() >= MAX_INFO_CHESTS:
-				chest.queue_free()
-				continue
+		elif path_is_chest or named_chest:
 			# Every chest stays in the world each match. Its invisible light anchor is
 			# attached regardless of whether this chest has already been opened.
 			info_chests.append({"node":chest, "position":chest.global_position, "name":String(chest.name)})
 			_setup_chest_glow(chest)
 	info_chests.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.position.x < b.position.x)
+	# Build the sound list after the final chest order is known so its indexes
+	# continue to match the information collected by each chest.
+	for index in range(info_chests.size()):
+		var chest := info_chests[index].node as Node3D
+		for chest_info in chest_proximity_players:
+			if chest_info.node == chest:
+				chest_info.index = index
+				break
+
+func _setup_chest_proximity_sound(chest: Node3D) -> void:
+	if chest == null or chest_near_stream == null:
+		return
+	var sound := chest.get_node_or_null("ChestProximitySoundPlayer") as AudioStreamPlayer3D
+	if sound == null:
+		sound = AudioStreamPlayer3D.new()
+		sound.name = "ChestProximitySoundPlayer"
+		sound.stream = chest_near_stream
+		sound.volume_db = -12.0
+		sound.unit_size = 4.0
+		sound.max_distance = CHEST_PROXIMITY_RANGE
+		sound.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+		chest.add_child(sound)
+	if not chest_proximity_players.any(func(item: Dictionary) -> bool: return item.node == chest):
+		chest_proximity_players.append({"node":chest, "player":sound, "index":-1})
+
+func _update_chest_proximity_audio() -> void:
+	if not is_instance_valid(player):
+		_stop_all_chest_proximity_sounds()
+		return
+	for chest_info in chest_proximity_players:
+		var chest := chest_info.node as Node3D
+		var sound := chest_info.player as AudioStreamPlayer3D
+		if not is_instance_valid(chest) or not is_instance_valid(sound):
+			continue
+		var chest_index := int(chest_info.index)
+		var chest_is_open: bool = bool(chest.get_meta("chest_sound_opened", false)) or collected_info.has(chest_index)
+		var close_enough := player.global_position.distance_to(chest.global_position) <= CHEST_PROXIMITY_RANGE
+		if chest_is_open or not close_enough:
+			if sound.playing:
+				sound.stop()
+		elif not sound.playing:
+			sound.play()
+
+func _stop_all_chest_proximity_sounds() -> void:
+	for chest_info in chest_proximity_players:
+		var sound := chest_info.get("player") as AudioStreamPlayer3D
+		if is_instance_valid(sound) and sound.playing:
+			sound.stop()
+
+func _stop_chest_proximity_sound(chest: Node3D) -> void:
+	if chest == null:
+		return
+	chest.set_meta("chest_sound_opened", true)
+	var sound := chest.get_node_or_null("ChestProximitySoundPlayer") as AudioStreamPlayer3D
+	if sound != null and sound.playing:
+		sound.stop()
 
 func _chest_id(chest: Node3D) -> String:
 	return String(chest.get_path())
@@ -1034,40 +1200,43 @@ func _setup_fireflies() -> void:
 		elif tree_root is MeshInstance3D and tree_root.name.to_lower().contains("tree") and (tree_root as MeshInstance3D).mesh != null and not _has_tree_scene_ancestor(tree_root):
 			tree_roots.append(tree_root)
 	tree_roots.sort_custom(func(a: Node3D, b: Node3D) -> bool: return a.global_position.x < b.global_position.x)
-	for tree_index in range(tree_roots.size()):
-		var tree := tree_roots[tree_index]
+	var valid_tree_roots: Array[Node3D] = []
+	var tree_bounds: Array[AABB] = []
+	for tree in tree_roots:
 		var bounds := _world_visual_bounds(tree)
-		var tree_center := bounds.get_center()
 		if bounds.size.length() < 0.1:
 			continue
+		valid_tree_roots.append(tree)
+		tree_bounds.append(bounds)
+	tree_roots = valid_tree_roots
+	for tree_index in range(tree_roots.size()):
+		var bounds := tree_bounds[tree_index]
+		var tree_center := bounds.get_center()
 		var tree_height := bounds.size.y
-		var firefly_count := 5
-		if tree_height >= 4.0:
-			firefly_count = 8
-		if tree_height >= 7.0:
-			firefly_count = 12
 		var nearby_trees := 0
 		for other_index in range(tree_roots.size()):
 			if other_index == tree_index:
 				continue
-			var other_bounds := _world_visual_bounds(tree_roots[other_index])
+			var other_bounds := tree_bounds[other_index]
 			var dx := bounds.get_center().x - other_bounds.get_center().x
 			var dz := bounds.get_center().z - other_bounds.get_center().z
 			var spacing := sqrt(dx * dx + dz * dz)
 			var touch_distance := maxf(4.5, (maxf(bounds.size.x, bounds.size.z) + maxf(other_bounds.size.x, other_bounds.size.z)) * 0.3)
 			if spacing < touch_distance:
 				nearby_trees += 1
-		if nearby_trees > 0:
-			firefly_count = maxi(3, int(round(float(firefly_count) / (1.0 + float(nearby_trees) * 0.5))))
+		# Keep three vertical points around isolated trees and reduce to top/bottom
+		# in tight clusters so the grove stays readable without thousands of nodes.
+		var firefly_count := 2 if nearby_trees >= 2 else 3
 		var radius := maxf(1.0, maxf(bounds.size.x, bounds.size.z) * 0.38)
 		for point_index in range(firefly_count):
 			var angle := TAU * float(point_index) / float(firefly_count) + float(tree_index) * 0.41
 			# Rotate through low, middle, and high points around the tree.
-			var level := point_index % 3
+			var level := point_index if firefly_count == 3 else (0 if point_index == 0 else 2)
 			var height_fraction: float = [0.18, 0.53, 0.88][level]
 			var height := lerpf(bounds.position.y + 0.25, bounds.end.y - 0.25, height_fraction)
 			positions.append(Vector3(tree_center.x + cos(angle) * radius, height, tree_center.z + sin(angle) * radius))
-			positions_with_light.append(point_index == 0 or (tree_height >= 7.0 and point_index == firefly_count / 2))
+			# A small subset emit light; most remain decorative emissive orbs.
+			positions_with_light.append(tree_index % 4 == 0 and point_index == 0)
 
 	for index in range(positions.size()):
 		_create_firefly(index, positions[index], positions_with_light[index])
@@ -1107,7 +1276,7 @@ func _create_firefly(index: int, base_position: Vector3, make_light: bool) -> vo
 	firefly_orbs.append(orb)
 	firefly_nodes.append(firefly)
 
-	if make_light:
+	if make_light and firefly_lights.size() < 36:
 		var glow := OmniLight3D.new()
 		glow.name = "FireflyGlow"
 		glow.light_color = Color("caff91")
@@ -1118,7 +1287,12 @@ func _create_firefly(index: int, base_position: Vector3, make_light: bool) -> vo
 		firefly_lights.append(glow)
 
 func _animate_fireflies(delta: float) -> void:
-	firefly_time += delta
+	firefly_update_accumulator += delta
+	if firefly_update_accumulator < FIREFLY_UPDATE_INTERVAL:
+		return
+	var animation_delta := minf(firefly_update_accumulator, 0.1)
+	firefly_update_accumulator = fmod(firefly_update_accumulator, FIREFLY_UPDATE_INTERVAL)
+	firefly_time += animation_delta
 	for index in range(firefly_nodes.size()):
 		var firefly := firefly_nodes[index]
 		if not is_instance_valid(firefly):
@@ -1244,6 +1418,66 @@ func _build_continuous_zone(zone: int, start_x: float) -> void:
 		0: _build_dungeon_layout(start_x)
 		1: _build_arena_maze(start_x)
 		2: _build_arcade_hall(start_x)
+
+func _build_environment_dressing() -> void:
+	# Keep these hand-placed additions grouped so they are easy to find and move
+	# in the editor. Positions stay in the unscaled level coordinate system.
+	if has_node("EnvironmentDressing"):
+		return
+	var dressing := Node3D.new()
+	dressing.name = "EnvironmentDressing"
+	add_child(dressing)
+	dressing.owner = self if Engine.is_editor_hint() else null
+
+	var trees := [
+		{"name":"DungeonPine_01", "at":Vector3(21, 0, -10.5), "scale":2.0},
+		{"name":"DungeonPine_02", "at":Vector3(37, 0, 10.5), "scale":1.8},
+		{"name":"DungeonPine_03", "at":Vector3(65, 0, -10.5), "scale":2.1},
+		{"name":"ArenaPine_01", "at":Vector3(80, 0, -10.5), "scale":2.0},
+		{"name":"ArenaPine_02", "at":Vector3(96, 0, 10.5), "scale":1.8},
+		{"name":"ArenaPine_03", "at":Vector3(113, 0, -10.5), "scale":2.1},
+		{"name":"ArenaPine_04", "at":Vector3(138, 0, 10.5), "scale":1.9},
+		{"name":"ArcadePlanterTree_01", "at":Vector3(151, 0, 10.7), "scale":1.55},
+		{"name":"ArcadePlanterTree_02", "at":Vector3(210, 0, -10.7), "scale":1.55}
+	]
+	for tree_spec in trees:
+		var tree := _add_model(ARENA + "tree.glb", tree_spec.at, Vector3.ONE * float(tree_spec.scale), dressing, true)
+		if tree != null:
+			tree.name = String(tree_spec.name)
+			_set_dressing_owner(tree)
+
+	# Small, intentional prop groups hug walls and alcoves; they leave the main
+	# walking lane, bridges, stairs, chests and arcade machines unobstructed.
+	var details := [
+		{"name":"DungeonRubble_01", "path":DUNGEON + "rocks.glb", "at":Vector3(25, 0, 10.2), "scale":1.6, "rotation":0.15},
+		{"name":"DungeonRubble_02", "path":DUNGEON + "stones.glb", "at":Vector3(40, 0, -10.1), "scale":1.35, "rotation":0.7},
+		{"name":"DungeonBarrel_01", "path":DUNGEON + "barrel.glb", "at":Vector3(17, 0, -10.4), "scale":1.65, "rotation":0.2},
+		{"name":"DungeonBanner_01", "path":DUNGEON + "banner.glb", "at":Vector3(33, 0, 11.8), "scale":1.8, "rotation":0.0},
+		{"name":"ArenaRubble_01", "path":DUNGEON + "rocks.glb", "at":Vector3(87, 0, 10.3), "scale":1.5, "rotation":0.45},
+		{"name":"ArenaRubble_02", "path":DUNGEON + "stones.glb", "at":Vector3(124, 0, -10.2), "scale":1.3, "rotation":0.9},
+		{"name":"ArenaBanner_01", "path":ARENA + "banner.glb", "at":Vector3(105, 0, 11.6), "scale":1.9, "rotation":0.0},
+		{"name":"ArenaBanner_02", "path":ARENA + "banner.glb", "at":Vector3(131, 0, -11.6), "scale":1.7, "rotation":PI},
+		{"name":"ArcadePot_01", "path":DUNGEON + "pot.glb", "at":Vector3(164, 0, 10.4), "scale":1.4, "rotation":0.3},
+		{"name":"ArcadePot_02", "path":DUNGEON + "pot.glb", "at":Vector3(190, 0, -10.4), "scale":1.4, "rotation":0.8},
+		{"name":"ArcadeCrate_01", "path":DUNGEON + "wood-structure.glb", "at":Vector3(201, 0, 10.5), "scale":1.35, "rotation":0.0}
+	]
+	for detail in details:
+		var prop := _add_model(String(detail.path), detail.at, Vector3.ONE * float(detail.scale), dressing, true, float(detail.rotation))
+		if prop != null:
+			prop.name = String(detail.name)
+			_set_dressing_owner(prop)
+	if Engine.is_editor_hint():
+		dressing.owner = self
+
+func _set_dressing_owner(node: Node) -> void:
+	if not Engine.is_editor_hint():
+		return
+	node.owner = self
+	for child in node.get_children():
+		if child.name == "AssetMeshCollision":
+			child.owner = self
+			for collision_shape in child.get_children():
+				collision_shape.owner = self
 
 func _build_dungeon_layout(start_x: float) -> void:
 	# Broken stone walls form a winding path; the intentional gaps are doorways.
@@ -1372,25 +1606,37 @@ func _build_player() -> void:
 	add_child(player)
 
 func _find_safe_spawn() -> Vector3:
+	if permanent_spawn_position_set:
+		return permanent_spawn_position
 	var capsule := CapsuleShape3D.new()
 	capsule.radius = 0.28
 	capsule.height = 1.2
 	var space := get_world_3d().direct_space_state
 	var clear_candidates: Array[Vector3] = []
-	var spawn_target := Vector3(4.5, 0.0, 0.0)
-	# Check the whole entrance aisle at half-metre spacing. The old coarse scan
-	# could miss a narrow clear spot and then fall back inside a blocking collider.
-	for x_step in range(4, 141, 2):
+	# The editable marker is on the stone clearing between the two trees in the
+	# first district, directly below its giant red banner. Keep the exact same
+	# first-district point as fallback; never use a banner in another district.
+	var spawn_target := Vector3(0.75, 0.15, 4.0) * MAP_SCALE
+	var spawn_marker := get_node_or_null("PlayerSpawnPoint") as Node3D
+	if spawn_marker != null:
+		spawn_target = spawn_marker.global_position
+	# Search only this small stone clearing, avoiding the banner pole and trees.
+	var spawn_scan_radius := 3.5
+	var scan_min_x := maxf(1.0, spawn_target.x - spawn_scan_radius)
+	var scan_max_x := minf(WORLD_LENGTH * MAP_SCALE - 1.0, spawn_target.x + spawn_scan_radius)
+	var scan_min_z := maxf(-ZONE_WIDTH * MAP_SCALE * 0.5 + 1.0, spawn_target.z - spawn_scan_radius)
+	var scan_max_z := minf(ZONE_WIDTH * MAP_SCALE * 0.5 - 1.0, spawn_target.z + spawn_scan_radius)
+	for x_step in range(int(scan_min_x * 2.0), int(scan_max_x * 2.0) + 1, 2):
 		var x := float(x_step) * 0.5
-		for z_step in range(-24, 25, 2):
+		for z_step in range(int(scan_min_z * 2.0), int(scan_max_z * 2.0) + 1, 2):
 			var z := float(z_step) * 0.5
-			var ray := PhysicsRayQueryParameters3D.create(Vector3(x, 4.0, z), Vector3(x, -1.0, z))
+			var ray := PhysicsRayQueryParameters3D.create(Vector3(x, spawn_target.y + 8.0, z), Vector3(x, spawn_target.y - 5.0, z))
 			ray.collision_mask = 1
 			var ground := space.intersect_ray(ray)
 			if ground.is_empty():
 				continue
 			var ground_y: float = ground.position.y
-			if ground_y < -0.2 or ground_y > 0.4:
+			if ground_y < spawn_target.y - 2.0 or ground_y > spawn_target.y + 1.5:
 				continue
 			if not _spawn_capsule_is_clear(space, capsule, x, z, ground_y):
 				continue
@@ -1402,12 +1648,59 @@ func _find_safe_spawn() -> Vector3:
 		)
 		for candidate in clear_candidates:
 			if _spawn_route_is_clear(space, capsule, candidate.x, candidate.z, candidate.y - 0.08):
+				permanent_spawn_position = candidate
+				permanent_spawn_position_set = true
 				return candidate
 		# If all forward lanes are narrow, spawn at the nearest verified clear cell.
+		permanent_spawn_position = clear_candidates[0]
+		permanent_spawn_position_set = true
 		return clear_candidates[0]
 	# Never use a hard-coded point that might be occupied in a user-edited map.
 	push_warning("No encontré una celda libre para el spawn; revisa las colisiones del área inicial.")
-	return Vector3(2, 0.08, 0)
+	permanent_spawn_position = spawn_target + Vector3.UP * 0.08
+	permanent_spawn_position_set = true
+	return permanent_spawn_position
+
+func _begin_water_respawn() -> void:
+	if water_respawn_pending or not game_running or not is_instance_valid(player):
+		return
+	water_respawn_pending = true
+	player.controls_enabled = false
+	player.set_physics_process(false)
+	player.velocity = Vector3.ZERO
+	player.visible = false
+	var wait_label := Label.new()
+	wait_label.name = "WaterRespawnMessage"
+	wait_label.set_anchors_preset(Control.PRESET_CENTER)
+	wait_label.position = Vector2(-260, 30)
+	wait_label.custom_minimum_size = Vector2(520, 64)
+	wait_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_cartoon_text(wait_label, 28)
+	wait_label.add_theme_color_override("font_color", Color("d8f2ff"))
+	if ui_layer != null:
+		ui_layer.add_child(wait_label)
+	for seconds_left in range(10, 0, -1):
+		if is_instance_valid(wait_label):
+			wait_label.text = "¡AGUA! REGRESO AL ESTANDARTE · %d" % seconds_left
+		await get_tree().create_timer(1.0).timeout
+	if not is_instance_valid(player):
+		water_respawn_pending = false
+		return
+	if is_instance_valid(wait_label):
+		wait_label.queue_free()
+	if not game_running:
+		player.visible = true
+		water_respawn_pending = false
+		return
+	var safe_spawn := _find_safe_spawn()
+	player.global_position = safe_spawn + Vector3(0, 10, 0)
+	player.last_safe_position = safe_spawn
+	player.velocity = Vector3.ZERO
+	player.visible = true
+	player.controls_enabled = false
+	player.set_physics_process(true)
+	water_respawn_pending = false
+	_start_spawn_intro()
 
 func _spawn_capsule_is_clear(space: PhysicsDirectSpaceState3D, capsule: CapsuleShape3D, x: float, z: float, ground_y: float) -> bool:
 	var overlap := PhysicsShapeQueryParameters3D.new()
@@ -1732,8 +2025,11 @@ func _show_menu_page(page: String) -> void:
 				_add_menu_label("Se agotó el tiempo antes de completar las misiones. Vuelve a intentarlo.", 16)
 			_add_menu_button("VOLVER AL INICIO", _return_to_menu)
 		"victory":
-			title.text = "¡EL REINO ESTÁ A SALVO!"
-			_add_menu_label("Completaste las misiones y frenaste la desinformación.", 17)
+			title.text = "¡EL REINO ESTÁ A SALVO!" if journalist_correct_classifications == JOURNALIST_CLAIMS.size() else "FINAL IRREGULAR"
+			var ending := final_classification_summary
+			if ending.is_empty():
+				ending = "Completaste las misiones y frenaste la desinformación."
+			_add_menu_label(ending, 17)
 			_add_menu_button("VOLVER AL INICIO", _return_to_menu)
 
 func _add_menu_label(message: String, size: int) -> void:
@@ -2181,7 +2477,18 @@ func _reset_match_state() -> void:
 	journalist_puzzle_sequence.clear()
 	journalist_puzzle_input.clear()
 	journalist_claim_index = -1
+	journalist_puzzle_stage = ""
+	journalist_minigame_sequence.clear()
+	journalist_minigame_input.clear()
 	influencer_has_information = false
+	journalist_correct_classifications = 0
+	journalist_rejected_false_count = 0
+	journalist_validated_info.clear()
+	journalist_claims = JOURNALIST_CLAIMS.duplicate(true)
+	influencer_delivery_queue.clear()
+	influencer_delivery_cursor = 0
+	shared_info_by_npc.clear()
+	final_classification_summary = ""
 	answered = 0
 	roulette_used = false
 	game_time_remaining = GAME_DURATION_SECONDS
@@ -2192,6 +2499,11 @@ func _reset_match_state() -> void:
 		player.set("speed", 6.0)
 	for chest_info in info_chests:
 		_close_chest_visual(chest_info.node as Node3D)
+	for chest_sound_info in chest_proximity_players:
+		var chest := chest_sound_info.node as Node3D
+		if is_instance_valid(chest):
+			chest.set_meta("chest_sound_opened", false)
+	_stop_all_chest_proximity_sounds()
 	var chest_progress := ConfigFile.new()
 	chest_progress.set_value("progress", "opened_chests", [])
 	chest_progress.save(CHEST_PROGRESS_PATH)
@@ -2208,6 +2520,12 @@ func _launch_game() -> void:
 	game_running = true
 	game_timer_timeout = false
 	day_cycle_elapsed = 0.0
+	if is_instance_valid(player):
+		var safe_spawn := _find_safe_spawn()
+		player.global_position = safe_spawn + Vector3(0, 10, 0)
+		player.last_safe_position = safe_spawn
+		player.velocity = Vector3.ZERO
+		player.visible = true
 	if day_phase_presets.size() >= 3:
 		_apply_day_phase(day_phase_presets[0], day_phase_presets[0], 0.0)
 	_update_timer_hud()
@@ -2270,7 +2588,10 @@ func _perform_restart_match() -> void:
 		_apply_day_phase(day_phase_presets[0], day_phase_presets[0], 0.0)
 	if is_instance_valid(player):
 		player.velocity = Vector3.ZERO
-		player.global_position = _find_safe_spawn()
+		var safe_spawn := _find_safe_spawn()
+		player.global_position = safe_spawn + Vector3(0, 10, 0)
+		player.last_safe_position = safe_spawn
+		player.visible = true
 		player.controls_enabled = true
 		player.set_physics_process(true)
 	if is_instance_valid(camera):
@@ -2285,6 +2606,7 @@ func _perform_restart_match() -> void:
 	_set_gameplay_ui_visible(true)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_broadcast_coop_state()
+	_start_spawn_intro()
 
 @rpc("any_peer", "call_remote", "reliable")
 func _request_restart_match() -> void:
@@ -2311,10 +2633,15 @@ func _end_game(won: bool, defeat_cause: String = "timeout") -> void:
 func _check_game_completion() -> void:
 	if not game_running:
 		return
-	var all_objectives_complete := collected_info.size() == info_chests.size() and info_delivered
+	var all_objectives_complete := collected_info.size() >= REQUIRED_INFO_CHESTS and info_delivered
 	all_objectives_complete = all_objectives_complete and interviewed_npcs.size() == npc_targets.size() and journalist_verified
-	all_objectives_complete = all_objectives_complete and informed_npcs.size() == npc_targets.size() and cheered_npcs.size() == npc_targets.size()
+	all_objectives_complete = all_objectives_complete and informed_npcs.size() == npc_targets.size()
+	all_objectives_complete = all_objectives_complete and influencer_delivery_cursor >= influencer_delivery_queue.size() and cheered_npcs.size() == npc_targets.size()
 	if all_objectives_complete:
+		if journalist_correct_classifications == JOURNALIST_CLAIMS.size():
+			final_classification_summary = "FINAL LIMPIO · El Mensajero clasificó correctamente los diez datos. Solo la información verdadera llegó a los vecinos."
+		else:
+			final_classification_summary = "FINAL IRREGULAR · Aciertos del Mensajero: %d / %d. El reino frenó el anuncio, pero quedaron errores de verificación y cabos sueltos." % [journalist_correct_classifications, JOURNALIST_CLAIMS.size()]
 		_end_game(true)
 
 func _update_timer_hud() -> void:
@@ -2766,14 +3093,14 @@ func _role_display_name(role: String) -> String:
 func _role_mission(role: String) -> String:
 	match role:
 		"Ciudadano":
-			return "Reúne y entrega fichas: %d/%d" % [collected_info.size(), info_chests.size()]
+			return "Reúne y entrega fichas: %d/%d" % [mini(collected_info.size(), REQUIRED_INFO_CHESTS), REQUIRED_INFO_CHESTS]
 		"Periodista":
 			if journalist_verified: return "Información verificada"
-			if info_delivered: return "Verifica los datos en la taquilla"
+			if info_delivered: return "Escanea los datos: %d/%d" % [maxi(journalist_claim_index, 0), journalist_claims.size()]
 			return "Entrevista vecinos: %d/%d" % [interviewed_npcs.size(), npc_targets.size()]
 		"Influencer":
 			if not influencer_has_information: return "Espera la información del Mensajero"
-			return "Comparte los datos: %d/%d" % [informed_npcs.size(), npc_targets.size()]
+			return "Difunde datos verificados: %d/%d" % [influencer_delivery_cursor, influencer_delivery_queue.size()]
 		"Candidato a alcalde":
 			return "Anima a vecinos: %d/%d" % [cheered_npcs.size(), npc_targets.size()]
 		_: return "Completa tu misión"
@@ -3019,9 +3346,15 @@ func _broadcast_coop_state() -> void:
 		"delivered": info_delivered,
 		"interviewed": interviewed_npcs.keys(),
 		"informed": informed_npcs.keys(),
+		"delivery_queue": influencer_delivery_queue,
+		"delivery_cursor": influencer_delivery_cursor,
+		"shared_info_by_npc": shared_info_by_npc,
+		"verified_info": journalist_validated_info,
 		"cheered": cheered_npcs.keys(),
 		"moods": npc_targets.map(func(npc_state: Dictionary) -> float: return float(npc_state.mood)),
 		"verified": journalist_verified,
+		"correct_classifications": journalist_correct_classifications,
+		"rejected_false": journalist_rejected_false_count,
 		"influencer_has_information": influencer_has_information
 	}
 	rpc("_receive_coop_state", state)
@@ -3032,14 +3365,22 @@ func _receive_coop_state(state: Dictionary) -> void:
 		if not collected_info.has(key):
 			collected_info[key] = state.collected[key]
 			if int(key) >= 0 and int(key) < info_chests.size():
-				_open_chest_visual(info_chests[int(key)].node as Node3D)
+				var chest := info_chests[int(key)].node as Node3D
+				_stop_chest_proximity_sound(chest)
+				_open_chest_visual(chest)
 	info_delivered = info_delivered or bool(state.get("delivered", false))
 	journalist_verified = journalist_verified or bool(state.get("verified", false))
+	journalist_correct_classifications = maxi(journalist_correct_classifications, int(state.get("correct_classifications", 0)))
+	journalist_rejected_false_count = maxi(journalist_rejected_false_count, int(state.get("rejected_false", 0)))
 	influencer_has_information = influencer_has_information or bool(state.get("influencer_has_information", false))
 	for index in state.get("interviewed", []):
 		interviewed_npcs[index] = true
 	for index in state.get("informed", []):
 		informed_npcs[index] = true
+	influencer_delivery_queue.assign(state.get("delivery_queue", influencer_delivery_queue))
+	influencer_delivery_cursor = int(state.get("delivery_cursor", influencer_delivery_cursor))
+	shared_info_by_npc = state.get("shared_info_by_npc", shared_info_by_npc)
+	journalist_validated_info.assign(state.get("verified_info", journalist_validated_info))
 	for index in state.get("cheered", []):
 		cheered_npcs[index] = true
 	var shared_moods: Array = state.get("moods", [])
@@ -3084,7 +3425,7 @@ func _update_nearest_station() -> void:
 				prompt.text = "E  ·  Abrir cofre y recoger información" if not collected_info.has(index) else "E  ·  Revisar información recogida"
 		"ticket":
 			if active_role == "Ciudadano":
-				prompt.text = "E  ·  Entregar información en la taquilla" if collected_info.size() == info_chests.size() else "Recoge todas las fichas antes de entregarlas"
+				prompt.text = "E  ·  Entregar información en la taquilla" if collected_info.size() >= REQUIRED_INFO_CHESTS else "Abre al menos 10 cofres antes de entregarla"
 			elif active_role == "Periodista":
 				prompt.text = "E  ·  Verificar la información" if info_delivered and interviewed_npcs.size() == npc_targets.size() and not journalist_verified else "Mensajero: entrevista al público y espera la entrega"
 			else:
@@ -3104,10 +3445,12 @@ func _update_nearest_station() -> void:
 							prompt.text = "Mantén E · Animando %d%% (8 s)" % roundi(bard_cheer_elapsed / BARD_CHEER_HOLD_DURATION * 100.0)
 						else:
 							prompt.text = "Mantén E durante 8 s · Animar un poco a " + String(target.name)
+					elif influencer_delivery_cursor >= influencer_delivery_queue.size():
+						prompt.text = "Entrega completada · " + String(target.name)
+					elif int(target.npc_index) == _next_npc_to_inform():
+						prompt.text = "E  ·  Entregar el siguiente dato a " + String(target.name)
 					elif informed_npcs.has(target.npc_index):
-						prompt.text = "Información entregada · " + String(target.name)
-					elif int(target.npc_index) == informed_npcs.size():
-						prompt.text = "E  ·  Entregar información a " + String(target.name)
+						prompt.text = "Dato entregado · espera el siguiente turno"
 					else:
 						prompt.text = "Entrega primero al siguiente vecino"
 				"Candidato a alcalde": prompt.text = "Ánimo recargando · %d%%" % mood_percent if state.recharging else "E  ·  Animar a " + String(target.name) + "  ·  Ánimo %d%%" % mood_percent
@@ -3154,25 +3497,27 @@ func _open_nearest_station() -> void:
 			elif collected_info.has(index):
 				panel_text.text = "✦   INFORMACIÓN RECOGIDA\n\n" + String(collected_info[index]) + "\n\nLleva todas las fichas a la máquina de tickets. Pulsa E para cerrar."
 			else:
-				var clues := ["Comprueba quién publicó el dato y encuentra la fuente original antes de compartirlo.", "Revisa la fecha: una noticia antigua puede circular como si fuera actual.", "Pregunta a cuántas personas consultaron; una muestra pequeña no representa a todo el barrio.", "Compara las cifras con documentos públicos y revisa cómo se calcularon.", "Una propuesta necesita plan, responsables y presupuesto para poder evaluarse."]
+				var clues := ["Alerta: un rumor sobre el centro comunitario no incluye un enlace oficial verificable.", "El calendario municipal anuncia una jornada de limpieza vecinal.", "Una encuesta a tres personas no representa a todo el reino.", "El portal electoral confirma fecha y hora del debate municipal.", "Una captura recortada no demuestra que el parque vaya a cerrar.", "Revisa si la propuesta de reparación presenta responsables y presupuesto.", "Compara la cifra del mensaje con el informe público original.", "El mensaje sobre fondos proviene de una cuenta anónima sin pruebas.", "Comprueba la fecha original de la noticia antes de compartirla.", "Consulta el acta electoral para confirmar el sitio y hora de votación."]
 				var clue := String(clues[index % clues.size()])
 				collected_info[index] = clue
 				_save_opened_chest(index)
-				_open_chest_visual(info_chests[index].node as Node3D)
-				_play_chest_open_sound(info_chests[index].node as Node3D)
+				var chest := info_chests[index].node as Node3D
+				_stop_chest_proximity_sound(chest)
+				_open_chest_visual(chest)
+				_play_chest_open_sound(chest)
 				answered = collected_info.size()
-				var progress := "\n\nFichas recogidas: %d / %d." % [collected_info.size(), info_chests.size()]
-				if collected_info.size() == info_chests.size():
-					progress += "\nYa tienes toda la información. Llévala a la máquina de tickets."
+				var progress := "\n\nFichas recogidas: %d / %d necesarias." % [mini(collected_info.size(), REQUIRED_INFO_CHESTS), REQUIRED_INFO_CHESTS]
+				if collected_info.size() >= REQUIRED_INFO_CHESTS:
+					progress += "\nYa tienes las fichas necesarias. Llévalas a la máquina de tickets."
 				panel_text.text = "✦   FICHA DE INFORMACIÓN %d\n\n%s%s\n\nPulsa E para cerrar." % [index + 1, clue, progress]
 				_broadcast_coop_state()
 			_update_information_hud()
 		"ticket":
-			if active_role == "Ciudadano" and collected_info.size() < info_chests.size():
-				panel_text.text = "✦   MÁQUINA DE TICKETS\n\nTodavía faltan fichas por recoger.\nFichas: %d / %d\n\nBusca los cofres del mapa y vuelve cuando tengas toda la información." % [collected_info.size(), info_chests.size()]
+			if active_role == "Ciudadano" and collected_info.size() < REQUIRED_INFO_CHESTS:
+				panel_text.text = "✦   MÁQUINA DE TICKETS\n\nTodavía faltan fichas por recoger.\nFichas: %d / %d\n\nAbre al menos 10 cofres y vuelve para entregar la información." % [collected_info.size(), REQUIRED_INFO_CHESTS]
 			elif active_role == "Ciudadano":
 				info_delivered = true
-				panel_text.text = "✓   INFORMACIÓN ENTREGADA\n\nLa máquina registró todas las fichas. Ya puedes revisar las fuentes, fechas y datos reunidos.\n\nEntrega completada: %d / %d fichas." % [collected_info.size(), info_chests.size()]
+				panel_text.text = "✓   INFORMACIÓN ENTREGADA\n\nLa máquina registró tus fichas. Ya puedes revisar las fuentes, fechas y datos reunidos.\n\nProgreso requerido: %d / %d fichas." % [mini(collected_info.size(), REQUIRED_INFO_CHESTS), REQUIRED_INFO_CHESTS]
 				_update_information_hud()
 				_broadcast_coop_state()
 				_broadcast_coop_state()
@@ -3206,7 +3551,7 @@ func _open_nearest_station() -> void:
 func _update_information_hud() -> void:
 	if hud == null:
 		return
-	var status := "INFORMACIÓN   %d / %d     ·     VECINOS   %d / %d" % [collected_info.size(), info_chests.size(), informed_npcs.size(), npc_targets.size()]
+	var status := "INFORMACIÓN   %d / %d     ·     VECINOS   %d / %d" % [mini(collected_info.size(), REQUIRED_INFO_CHESTS), REQUIRED_INFO_CHESTS, informed_npcs.size(), npc_targets.size()]
 	if is_solo_mode:
 		status += "\nMISIÓN · %s\n%s" % [_role_display_name(active_role).to_upper(), _role_mission(active_role)]
 	else:
@@ -3267,55 +3612,170 @@ func _start_journalist_verification() -> void:
 		panel_text.text = "Antes de revisar la información, entrevista a todos los vecinos. Entrevistas: %d / %d." % [interviewed_npcs.size(), npc_targets.size()]
 		return
 	journalist_results.clear()
+	journalist_correct_classifications = 0
+	journalist_rejected_false_count = 0
+	journalist_validated_info.clear()
 	journalist_claim_index = 0
+	journalist_puzzle_stage = "minigame"
+	_prepare_journalist_minigame()
 	_show_journalist_claim()
+
+func _prepare_journalist_minigame() -> void:
+	journalist_minigame_kind = randi_range(0, 3)
+	journalist_minigame_sequence.clear()
+	journalist_minigame_input.clear()
+	var puzzle_text := ""
+	var options: Array[String] = []
+	journalist_puzzle_correct_option = 1
+	match journalist_minigame_kind:
+		0:
+			puzzle_text = "CÓDIGO DE FUENTE · Elige la pista que permite rastrear el dato hasta su origen."
+			options = ["Una captura reenviada", "El documento o portal original", "Un comentario anónimo"]
+			journalist_puzzle_correct_option = 2
+		1:
+			puzzle_text = "CANDADO DE CONTRASEÑA · Memoriza la clave y vuelve a introducirla en orden."
+			for _step in range(3):
+				journalist_minigame_sequence.append(randi_range(1, 3))
+		2:
+			puzzle_text = "RUTA DEL ESCÁNER · Traza el camino iluminado introduciendo sus señales en orden."
+			for _step in range(4):
+				journalist_minigame_sequence.append(randi_range(1, 3))
+		_:
+			puzzle_text = "PUZLE DE TRES EN RAYA\n\nX | X | 3\nO | 5 | O\n7 | 8 | 9\n\nElige la casilla que completa la línea de X."
+			options = ["Casilla 3 · completa la línea", "Casilla 5 · no forma línea", "Casilla 9 · deja el rumor abierto"]
+			journalist_puzzle_correct_option = 1
+	if not options.is_empty():
+		var correct_option_text := options[journalist_puzzle_correct_option - 1]
+		options.shuffle()
+		journalist_puzzle_correct_option = options.find(correct_option_text) + 1
+	journalist_claims[journalist_claim_index]["puzzle_text"] = puzzle_text
+	journalist_claims[journalist_claim_index]["puzzle_options"] = options
+	journalist_claims[journalist_claim_index]["puzzle_correct"] = journalist_puzzle_correct_option
+	journalist_claims[journalist_claim_index]["puzzle_kind"] = journalist_minigame_kind
+	journalist_claims[journalist_claim_index]["puzzle_sequence"] = journalist_minigame_sequence.duplicate()
+	journalist_puzzle_stage = "sequence" if journalist_minigame_kind == 1 or journalist_minigame_kind == 2 else "minigame"
 
 func _show_journalist_claim() -> void:
 	if journalist_claim_index >= journalist_claims.size():
 		journalist_claim_index = -1
+		journalist_puzzle_stage = ""
 		journalist_verified = true
 		influencer_has_information = true
-		var handoff: String
-		if is_solo_mode:
-			handoff = "En solitario, la información pasó automáticamente al Bardo. Cuando quieras, cambia manualmente a ese rol para repartirla a los vecinos, uno por uno."
-		else:
-			handoff = "La información se entregó al Bardo. Ahora debe compartirla con los vecinos, uno por uno."
-		panel_text.text = "✓   VERIFICACIÓN COMPLETADA\n\nResultados que decidiste:\n%s\n\n%s" % ["\n".join(journalist_results), handoff]
+		_prepare_influencer_deliveries()
+		shared_info_by_npc.clear()
+		var handoff := "En solitario, los datos pasaron automáticamente al Bardo. Cambia a ese rol y entrega a cada vecino un dato verdadero verificado." if is_solo_mode else "Los datos verificados pasaron al Bardo. Debe compartirlos con los vecinos, uno por uno."
+		var ending := "FINAL LIMPIO" if journalist_correct_classifications == journalist_claims.size() else "FINAL IRREGULAR"
+		panel_text.text = "✓   ESCANEO COMPLETADO · %s\n\nAciertos: %d / %d\nDatos verdaderos aprobados: %d\nDatos falsos rechazados: %d\n\n%s" % [ending, journalist_correct_classifications, journalist_claims.size(), journalist_validated_info.size(), journalist_rejected_false_count, handoff]
 		_update_information_hud()
 		_broadcast_coop_state()
 		return
 	var claim: Dictionary = journalist_claims[journalist_claim_index]
-	var previous_results := ""
-	if not journalist_results.is_empty():
-		previous_results = "Tus resultados hasta ahora:\n" + "\n".join(journalist_results) + "\n\n"
-	panel_text.text = "PUZZLE DE VERIFICACIÓN · %d / %d\n\n%sEvalúa las fuentes y decide: ¿es verdadera o falsa?\n\n%s\n\nPulsa 1 para VERDADERA o 2 para FALSA." % [journalist_claim_index + 1, journalist_claims.size(), previous_results, String(claim.statement)]
+	if journalist_puzzle_stage == "minigame":
+		if journalist_minigame_kind == 1 or journalist_minigame_kind == 2:
+			var code := " · ".join(PackedStringArray(journalist_minigame_sequence.map(func(value: int) -> String: return str(value))))
+			panel_text.text = "ESCANEO DE DATOS · %d / %d\n\n%s\n\nClave: %s\nPulsa las teclas 1, 2 y 3 en el mismo orden." % [journalist_claim_index + 1, journalist_claims.size(), String(claim.get("puzzle_text", "")), code]
+		else:
+			var options: Array = claim.get("puzzle_options", [])
+			panel_text.text = "ESCANEO DE DATOS · %d / %d\n\nResuelve el minipuzle para abrir el expediente:\n%s\n\n1 · %s\n2 · %s\n3 · %s" % [journalist_claim_index + 1, journalist_claims.size(), String(claim.get("puzzle_text", "")), String(options[0]), String(options[1]), String(options[2])]
+	elif journalist_puzzle_stage == "sequence":
+		var code := " · ".join(PackedStringArray(journalist_minigame_sequence.map(func(value: int) -> String: return str(value))))
+		var typed := " · ".join(PackedStringArray(journalist_minigame_input.map(func(value: int) -> String: return str(value))))
+		panel_text.text = "PUZLE EN CURSO · %d / %d\n\n%s\n\nClave: %s\nEntrada: %s\n\nContinúa con las teclas 1, 2 y 3." % [journalist_claim_index + 1, journalist_claims.size(), String(claim.get("puzzle_text", "")), code, typed]
+	else:
+		var classification := "VERDADERO · las fuentes respaldan el dato." if bool(claim.is_true) else "FALSO · las fuentes no respaldan el dato."
+		panel_text.text = "EXPEDIENTE %d / %d\n\n%s\n\nESCÁNER: %s\n\n¿Apruebas este dato para compartirlo?\n1 · SÍ, aprobar\n2 · NO, rechazar" % [journalist_claim_index + 1, journalist_claims.size(), String(claim.statement), classification]
 
-func _answer_journalist_claim(answer_is_true: bool) -> void:
+func _answer_journalist_claim(choice: int) -> void:
 	if journalist_claim_index < 0 or journalist_claim_index >= journalist_claims.size():
 		return
 	var claim: Dictionary = journalist_claims[journalist_claim_index]
-	if answer_is_true != bool(claim.is_true):
-		panel_text.text = "Esa decisión contradice las fuentes reunidas. Vuelve a revisar la afirmación y elige de nuevo.\n\n%s" % String(claim.statement)
+	if journalist_puzzle_stage == "minigame":
+		if choice != int(claim.get("puzzle_correct", 1)):
+			_show_journalist_claim()
+			panel_text.text = "El minipuzle no quedó resuelto. Revisa las pistas e inténtalo otra vez.\n\n" + panel_text.text
+			return
+		journalist_puzzle_stage = "classify"
+		_show_journalist_claim()
 		return
-	journalist_results.append("Dato %d: %s" % [journalist_claim_index + 1, "VERDADERO" if answer_is_true else "FALSO"])
+	if journalist_puzzle_stage == "sequence":
+		journalist_minigame_input.append(choice)
+		var step := journalist_minigame_input.size() - 1
+		if journalist_minigame_input[step] != journalist_minigame_sequence[step]:
+			journalist_minigame_input.clear()
+			_show_journalist_claim()
+			panel_text.text = "La clave no coincide. La ruta volvió al inicio. Inténtalo otra vez.\n\n" + panel_text.text
+			return
+		if journalist_minigame_input.size() < journalist_minigame_sequence.size():
+			_show_journalist_claim()
+			return
+		journalist_puzzle_stage = "classify"
+		_show_journalist_claim()
+		return
+	var claim_is_true := bool(claim.is_true)
+	var approved := choice == 1
+	var correct := approved == claim_is_true
+	if correct:
+		journalist_correct_classifications += 1
+	if claim_is_true and approved:
+		journalist_validated_info.append(journalist_claim_index)
+	if not claim_is_true and not approved:
+		journalist_rejected_false_count += 1
+	var result_text := "CORRECTO" if correct else "ERROR DE VERIFICACIÓN"
+	var feedback := "Dato verdadero aprobado y listo para difundirse." if claim_is_true and approved else "Dato falso rechazado; no se difundirá." if not claim_is_true and not approved else "Decisión incorrecta: este dato no se compartirá."
+	journalist_results.append("Dato %d · %s · %s" % [journalist_claim_index + 1, result_text, "APROBADO" if approved else "RECHAZADO"])
+	panel_text.text = "%s\n\n%s\n\nProgreso: %d / %d.\n\nPulsa E para continuar." % [result_text, feedback, journalist_claim_index + 1, journalist_claims.size()]
 	journalist_claim_index += 1
-	_show_journalist_claim()
+	journalist_puzzle_stage = "result"
+
+func _prepare_influencer_deliveries() -> void:
+	influencer_delivery_queue.clear()
+	influencer_delivery_cursor = 0
+	var npc_order: Array[int] = []
+	for npc_index in range(npc_targets.size()):
+		npc_order.append(npc_index)
+	if npc_order.is_empty():
+		return
+	npc_order.shuffle()
+	var verified_facts := journalist_validated_info.duplicate()
+	verified_facts.shuffle()
+	var delivery_count := maxi(npc_order.size(), verified_facts.size())
+	for delivery_index in range(delivery_count):
+		var npc_index: int = int(npc_order[delivery_index]) if delivery_index < npc_order.size() else int(npc_order.pick_random())
+		var info_index := int(verified_facts[delivery_index]) if delivery_index < verified_facts.size() else -1
+		influencer_delivery_queue.append({"npc":npc_index, "info":info_index})
 
 func _share_info_to_npc(npc_index: int) -> void:
 	if not influencer_has_information:
-		panel_text.text = "Mantén E junto al vecino durante 8 segundos. El Bardo aumentará su ánimo en un tercio."
+		panel_text.text = "Espera a que el Mensajero termine de escanear los diez datos."
 		return
-	if informed_npcs.has(npc_index):
-		panel_text.text = "Este vecino ya recibió la información verificada."
+	if influencer_delivery_cursor >= influencer_delivery_queue.size():
+		panel_text.text = "Ya se completó la difusión de todos los datos verificados."
 		return
-	if npc_index != informed_npcs.size():
-		panel_text.text = "Entrega la información al siguiente vecino de la fila antes de continuar."
+	var delivery: Dictionary = influencer_delivery_queue[influencer_delivery_cursor]
+	var expected_npc := int(delivery.npc)
+	if npc_index != expected_npc:
+		var next_name := String(npc_targets[expected_npc].name).replace("_", " ")
+		panel_text.text = "Sigue el orden aleatorio de difusión. El siguiente vecino es %s." % next_name
 		return
-	informed_npcs[npc_index] = true
 	var npc_name: String = String(npc_targets[npc_index].name).replace("_", " ")
-	panel_text.text = "MENSAJE COMPARTIDO · %s\n\nCompartiste con el vecino información revisada por el Mensajero. También puedes comunicarla a tus compañeros." % npc_name
+	var info_index := int(delivery.info)
+	if info_index >= 0:
+		var messages: Array = shared_info_by_npc.get(npc_index, [])
+		messages.append(info_index)
+		shared_info_by_npc[npc_index] = messages
+		var fact := String(journalist_claims[info_index].statement)
+		panel_text.text = "MENSAJE VERIFICADO · %s\n\nCompartiste un dato verdadero aprobado por el Mensajero:\n“%s”\n\nDifusión: %d / %d." % [npc_name, fact, influencer_delivery_cursor + 1, influencer_delivery_queue.size()]
+	else:
+		panel_text.text = "ALERTA DE FUENTES · %s\n\nNo se validó otro dato verdadero. Avisaste al vecino que espere una fuente confirmada y no difundiste rumores.\n\nDifusión: %d / %d." % [npc_name, influencer_delivery_cursor + 1, influencer_delivery_queue.size()]
+	informed_npcs[npc_index] = true
+	influencer_delivery_cursor += 1
 	_update_information_hud()
 	_broadcast_coop_state()
+
+func _next_npc_to_inform() -> int:
+	if influencer_delivery_cursor < 0 or influencer_delivery_cursor >= influencer_delivery_queue.size():
+		return -1
+	return int(influencer_delivery_queue[influencer_delivery_cursor].npc)
 
 func _open_chest_visual(chest: Node3D) -> void:
 	if chest == null:
@@ -3343,6 +3803,11 @@ func _play_chest_open_sound(chest: Node3D) -> void:
 	sound.play()
 
 func _load_chest_open_sound() -> void:
+	chest_near_stream = load(CHEST_NEAR_SOUND_PATH) as AudioStreamMP3
+	if chest_near_stream == null:
+		push_warning("No pude cargar la música de proximidad de los cofres.")
+	else:
+		chest_near_stream.loop = true
 	var file := FileAccess.open(CHEST_OPEN_SOUND_PATH, FileAccess.READ)
 	if file == null or file.get_length() <= 44:
 		push_warning("No pude cargar el sonido de apertura del cofre.")
@@ -3431,6 +3896,12 @@ func _answer(choice: int) -> void:
 	question_index = -1
 
 func _close_question() -> void:
+	if journalist_claim_index >= 0 and journalist_puzzle_stage == "result":
+		journalist_puzzle_stage = "minigame"
+		if journalist_claim_index < journalist_claims.size():
+			_prepare_journalist_minigame()
+		_show_journalist_claim()
+		return
 	panel.visible = false
 	question_index = -1
 

@@ -13,6 +13,7 @@ var look_pivot: Node3D
 var look_pitch := 0.0
 var space_was_pressed := false
 var controls_enabled := true
+var fall_respawn_requested := false
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -25,6 +26,8 @@ func _notification(what: int) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _physics_process(delta: float) -> void:
+	if global_position.y > -1.5:
+		fall_respawn_requested = false
 	var input := Input.get_vector("move_left", "move_right", "move_up", "move_down") if controls_enabled else Vector2.ZERO
 	# Read physical WASD directly as a fallback, so movement still works if an
 	# imported keyboard device ID differs from the one stored in InputMap.
@@ -54,9 +57,15 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	if is_on_floor() and global_position.y > -0.1:
 		last_safe_position = global_position
-	elif global_position.y < -1.5:
-		global_position = last_safe_position + Vector3(0, 0.08, 0)
+	elif global_position.y < -1.5 and not fall_respawn_requested:
+		fall_respawn_requested = true
 		velocity = Vector3.ZERO
+		var world := get_parent()
+		if world != null and world.has_method("_begin_water_respawn"):
+			world.call_deferred("_begin_water_respawn")
+		else:
+			global_position = last_safe_position + Vector3(0, 0.08, 0)
+		return
 	if anim:
 		if not is_on_floor():
 			play_animation("jump")

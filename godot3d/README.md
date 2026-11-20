@@ -25,7 +25,7 @@ El renderer es Compatibility/OpenGL 3.3. La partida comienza en el menú; usa el
 - **Solitario:** el jugador cambia entre los cuatro roles con Tab.
 - **Cooperativo:** crea una sala o conéctate con un código. El anfitrión inicia la partida desde la sala.
 - Los roles disponibles son Héroe (Ciudadano), Mensajero (Periodista), Bardo (Influencer) y Revolucionario (Candidato a alcalde). En una partida cooperativa no se asignan Periodista e Influencer a la misma persona.
-- La partida tiene un límite de 10 minutos. Reúne y entrega fichas, entrevista a los vecinos, verifica la información, difúndela y mantén alta la confianza.
+- La partida tiene un límite de 10 minutos. El Héroe reúne y entrega hasta diez fichas; el Mensajero entrevista a los vecinos y resuelve un minipuzle por cada dato antes de aprobarlo o rechazarlo. El Bardo difunde solo los datos verdaderos aprobados, en un orden aleatorio de vecinos; los errores llevan a un final irregular. El Revolucionario mantiene alta la confianza.
 - El primer distrito tiene cinco guardias con barra de ánimo. El ciclo de día y noche afecta el cielo y las luciérnagas.
 
 La conexión cooperativa usa ENet por UDP en el puerto 7777. En una red local se puede conectar con el código generado; jugar por Internet puede requerir redirección del puerto en el router.
