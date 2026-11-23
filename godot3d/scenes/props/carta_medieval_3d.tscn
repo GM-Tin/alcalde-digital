@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/medieval_letter_3d.gd" id="1_letter"]
+
+[node name="CartaMedieval3D" type="StaticBody3D"]
+script = ExtResource("1_letter")

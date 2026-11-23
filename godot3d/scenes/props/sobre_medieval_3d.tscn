@@ -1,0 +1,88 @@
+[gd_scene format=3 uid="uid://b3uv8ormmuw1m"]
+
+[sub_resource type="BoxShape3D" id="Sobre_colision"]
+size = Vector3(0.94, 0.62, 0.035)
+
+[sub_resource type="StandardMaterial3D" id="Material_papel"]
+albedo_color = Color(0.99, 0.95, 0.84, 1)
+roughness = 0.95
+
+[sub_resource type="StandardMaterial3D" id="Material_solapa"]
+albedo_color = Color(0.93, 0.88, 0.76, 1)
+roughness = 0.94
+
+[sub_resource type="StandardMaterial3D" id="Material_dorado"]
+albedo_color = Color(0.95, 0.61, 0.18, 1)
+roughness = 0.55
+
+[sub_resource type="CylinderMesh" id="Borde_sello_mesh"]
+material = SubResource("Material_dorado")
+top_radius = 0.092
+bottom_radius = 0.092
+height = 0.024
+radial_segments = 12
+rings = 1
+
+[sub_resource type="StandardMaterial3D" id="Material_cera"]
+albedo_color = Color(0.64, 0.07, 0.08, 1)
+roughness = 0.68
+
+[sub_resource type="SphereMesh" id="Cera_mesh"]
+material = SubResource("Material_cera")
+radius = 0.078
+height = 0.12
+radial_segments = 12
+rings = 6
+
+[sub_resource type="BoxMesh" id="Emblema_mesh"]
+material = SubResource("Material_dorado")
+size = Vector3(0.06, 0.012, 0.01)
+
+[node name="Sobre_Medieval_3D" type="StaticBody3D" unique_id=120676455]
+
+[node name="Colision" type="CollisionShape3D" parent="." unique_id=1927503638]
+shape = SubResource("Sobre_colision")
+[node name="Pliegue_izquierdo" type="CSGPolygon3D" parent="." unique_id=1168080926]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.047)
+polygon = PackedVector2Array(-0.445, 0.12, 0, -0.12, -0.445, -0.285)
+depth = 0.006
+material = SubResource("Material_solapa")
+
+[node name="Pliegue_derecho" type="CSGPolygon3D" parent="." unique_id=1259388491]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.047)
+polygon = PackedVector2Array(0.445, 0.12, 0.445, -0.285, 0, -0.12)
+depth = 0.006
+material = SubResource("Material_solapa")
+
+[node name="Pliegue_inferior" type="CSGPolygon3D" parent="." unique_id=257782316]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.052)
+polygon = PackedVector2Array(-0.445, -0.285, 0, -0.08, 0.445, -0.285)
+depth = 0.007
+material = SubResource("Material_papel")
+
+[node name="Solapa_superior" type="CSGPolygon3D" parent="." unique_id=1045291157]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.056)
+polygon = PackedVector2Array(-0.445, 0.285, 0.445, 0.285, 0.43, 0.22, 0.35, 0.13, 0.22, 0.045, 0.1, -0.02, 0, -0.09, -0.1, -0.02, -0.22, 0.045, -0.35, 0.13, -0.43, 0.22)
+depth = 0.009
+material = SubResource("Material_solapa")
+[node name="Costura_doblado_izquierda" type="CSGBox3D" parent="." unique_id=1301172090]
+transform = Transform3D(0.88233286, 0.4706259, 0, -0.4706259, 0.88233286, 0, 0, 0, 1, -0.222, 0.01, 0.063)
+size = Vector3(0.51, 0.009, 0.006)
+material = SubResource("Material_dorado")
+
+[node name="Costura_doblado_derecha" type="CSGBox3D" parent="." unique_id=226765039]
+transform = Transform3D(0.88233286, -0.4706259, 0, 0.4706259, 0.88233286, 0, 0, 0, 1, 0.222, 0.01, 0.063)
+size = Vector3(0.51, 0.009, 0.006)
+material = SubResource("Material_dorado")
+
+[node name="Borde_del_sello" type="MeshInstance3D" parent="." unique_id=1778684923]
+transform = Transform3D(1, 0, 0, 0, -3.6199901e-06, -1, 0, 1, -3.6199901e-06, 0, -0.105, 0.075)
+mesh = SubResource("Borde_sello_mesh")
+
+[node name="Sello_de_cera" type="MeshInstance3D" parent="." unique_id=270685391]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 0.36, 0, -0.105, 0.095)
+mesh = SubResource("Cera_mesh")
+
+[node name="Marca_real" type="MeshInstance3D" parent="." unique_id=803390918]
+transform = Transform3D(0.7071069, -0.70710665, 0, 0.70710665, 0.7071069, 0, 0, 0, 1, 0, -0.105, 0.126)
+mesh = SubResource("Emblema_mesh")

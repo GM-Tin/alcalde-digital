@@ -1,0 +1,239 @@
+[gd_scene load_steps=18 format=3]
+
+[ext_resource type="FontFile" path="res://assets/ui/fonts/LilitaOne-Regular.ttf" id="CartoonFont"]
+[ext_resource type="Script" path="res://scripts/information_board.gd" id="BoardScript"]
+
+[sub_resource type="StandardMaterial3D" id="Wood"]
+albedo_color = Color(0.25, 0.11, 0.055, 1)
+roughness = 0.88
+
+[sub_resource type="StandardMaterial3D" id="WoodLight"]
+albedo_color = Color(0.47, 0.24, 0.105, 1)
+roughness = 0.82
+
+[sub_resource type="StandardMaterial3D" id="WoodDark"]
+albedo_color = Color(0.13, 0.075, 0.055, 1)
+roughness = 0.92
+
+[sub_resource type="StandardMaterial3D" id="Roof"]
+albedo_color = Color(0.12, 0.2, 0.31, 1)
+roughness = 0.84
+
+[sub_resource type="StandardMaterial3D" id="RoofLight"]
+albedo_color = Color(0.22, 0.36, 0.51, 1)
+roughness = 0.78
+
+[sub_resource type="StandardMaterial3D" id="Gold"]
+albedo_color = Color(0.93, 0.58, 0.16, 1)
+metallic = 0.12
+roughness = 0.48
+
+[sub_resource type="StandardMaterial3D" id="Paper"]
+albedo_color = Color(0.96, 0.84, 0.59, 1)
+roughness = 0.96
+
+[sub_resource type="StandardMaterial3D" id="PaperLight"]
+albedo_color = Color(1, 0.94, 0.75, 1)
+roughness = 0.95
+
+[sub_resource type="StandardMaterial3D" id="InkBlue"]
+albedo_color = Color(0.08, 0.31, 0.59, 1)
+roughness = 0.68
+
+[sub_resource type="StandardMaterial3D" id="InkRed"]
+albedo_color = Color(0.67, 0.13, 0.1, 1)
+roughness = 0.7
+
+[sub_resource type="StandardMaterial3D" id="Ink"]
+albedo_color = Color(0.32, 0.2, 0.1, 1)
+roughness = 0.93
+
+[sub_resource type="BoxShape3D" id="BoardCollision"]
+size = Vector3(2.35, 1.45, 0.38)
+
+[sub_resource type="BoxShape3D" id="PostCollision"]
+size = Vector3(0.24, 2.7, 0.26)
+
+[sub_resource type="BoxShape3D" id="CrossbarCollision"]
+size = Vector3(2.45, 0.2, 0.34)
+
+[sub_resource type="BoxShape3D" id="RoofCollision"]
+size = Vector3(2.85, 0.22, 1.05)
+
+[node name="Tablon_Anuncios_Medieval_3D" type="StaticBody3D"]
+script = ExtResource("BoardScript")
+metadata/prop_type = "information_noticeboard"
+
+[node name="Colision_panel" type="CollisionShape3D" parent="."]
+position = Vector3(0, 1.85, 0)
+shape = SubResource("BoardCollision")
+
+[node name="Colision_pata_izquierda" type="CollisionShape3D" parent="."]
+position = Vector3(-1.03, 1.35, 0)
+shape = SubResource("PostCollision")
+
+[node name="Colision_pata_derecha" type="CollisionShape3D" parent="."]
+position = Vector3(1.03, 1.35, 0)
+shape = SubResource("PostCollision")
+
+[node name="Colision_travesano" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.54, 0)
+shape = SubResource("CrossbarCollision")
+
+[node name="Colision_techo" type="CollisionShape3D" parent="."]
+position = Vector3(0, 3.04, 0)
+shape = SubResource("RoofCollision")
+
+[node name="Pata_izquierda" type="CSGBox3D" parent="."]
+position = Vector3(-1.03, 1.36, 0)
+size = Vector3(0.26, 2.72, 0.28)
+material = SubResource("Wood")
+
+[node name="Pata_derecha" type="CSGBox3D" parent="."]
+position = Vector3(1.03, 1.36, 0)
+size = Vector3(0.26, 2.72, 0.28)
+material = SubResource("Wood")
+
+[node name="Base_izquierda" type="CSGBox3D" parent="."]
+position = Vector3(-1.03, 0.08, 0)
+size = Vector3(0.48, 0.18, 0.52)
+material = SubResource("WoodLight")
+
+[node name="Base_derecha" type="CSGBox3D" parent="."]
+position = Vector3(1.03, 0.08, 0)
+size = Vector3(0.48, 0.18, 0.52)
+material = SubResource("WoodLight")
+
+[node name="Travesano_inferior" type="CSGBox3D" parent="."]
+position = Vector3(0, 0.55, 0)
+size = Vector3(2.52, 0.22, 0.34)
+material = SubResource("WoodLight")
+
+[node name="Panel_fondo" type="CSGBox3D" parent="."]
+position = Vector3(0, 1.87, -0.13)
+size = Vector3(2.15, 1.45, 0.18)
+material = SubResource("WoodDark")
+
+[node name="Marco_superior" type="CSGBox3D" parent="."]
+position = Vector3(0, 2.66, 0.005)
+size = Vector3(2.38, 0.16, 0.24)
+material = SubResource("WoodLight")
+
+[node name="Marco_inferior" type="CSGBox3D" parent="."]
+position = Vector3(0, 1.08, 0.005)
+size = Vector3(2.38, 0.16, 0.24)
+material = SubResource("WoodLight")
+
+[node name="Marco_izquierdo" type="CSGBox3D" parent="."]
+position = Vector3(-1.09, 1.87, 0.005)
+size = Vector3(0.16, 1.68, 0.24)
+material = SubResource("WoodLight")
+
+[node name="Marco_derecho" type="CSGBox3D" parent="."]
+position = Vector3(1.09, 1.87, 0.005)
+size = Vector3(0.16, 1.68, 0.24)
+material = SubResource("WoodLight")
+
+[node name="Tablero_de_pergamino" type="CSGBox3D" parent="."]
+position = Vector3(0, 1.88, 0.012)
+size = Vector3(1.9, 1.28, 0.035)
+material = SubResource("Paper")
+
+[node name="Letrero_del_reino" type="CSGBox3D" parent="."]
+position = Vector3(0, 2.78, 0.04)
+size = Vector3(1.42, 0.25, 0.16)
+material = SubResource("WoodDark")
+
+[node name="Filete_dorado_letrero" type="CSGBox3D" parent="."]
+position = Vector3(0, 2.78, 0.13)
+size = Vector3(1.32, 0.035, 0.035)
+material = SubResource("Gold")
+
+[node name="Techo_cuerpo" type="CSGBox3D" parent="."]
+position = Vector3(0, 3.0, 0)
+size = Vector3(2.88, 0.22, 1.04)
+material = SubResource("Roof")
+
+[node name="Alero_madera" type="CSGBox3D" parent="."]
+position = Vector3(0, 2.87, 0.04)
+size = Vector3(3.02, 0.12, 1.12)
+material = SubResource("WoodLight")
+
+[node name="Liston_frontal" type="CSGBox3D" parent="."]
+position = Vector3(0, 2.98, 0.55)
+size = Vector3(2.84, 0.1, 0.08)
+material = SubResource("WoodDark")
+
+[node name="Pergamino_aviso_izquierdo" type="CSGBox3D" parent="."]
+position = Vector3(-0.53, 1.9, 0.052)
+rotation = Vector3(0, 0, -0.07)
+size = Vector3(0.53, 0.77, 0.035)
+material = SubResource("PaperLight")
+
+[node name="Pergamino_aviso_central" type="CSGBox3D" parent="."]
+position = Vector3(0.05, 1.91, 0.052)
+rotation = Vector3(0, 0, 0.025)
+size = Vector3(0.48, 0.86, 0.035)
+material = SubResource("PaperLight")
+
+[node name="Pergamino_aviso_derecho" type="CSGBox3D" parent="."]
+position = Vector3(0.55, 1.88, 0.052)
+rotation = Vector3(0, 0, 0.08)
+size = Vector3(0.48, 0.7, 0.035)
+material = SubResource("PaperLight")
+
+[node name="Sello_azul_izquierdo" type="CSGBox3D" parent="."]
+position = Vector3(-0.53, 2.19, 0.078)
+size = Vector3(0.13, 0.1, 0.025)
+material = SubResource("InkBlue")
+
+[node name="Sello_rojo_derecho" type="CSGBox3D" parent="."]
+position = Vector3(0.55, 2.09, 0.078)
+size = Vector3(0.13, 0.1, 0.025)
+material = SubResource("InkRed")
+
+[node name="Escritura_aviso_izquierdo_1" type="CSGBox3D" parent="."]
+position = Vector3(-0.53, 1.95, 0.076)
+rotation = Vector3(0, 0, -0.07)
+size = Vector3(0.3, 0.018, 0.008)
+material = SubResource("Ink")
+
+[node name="Escritura_aviso_izquierdo_2" type="CSGBox3D" parent="."]
+position = Vector3(-0.53, 1.82, 0.076)
+rotation = Vector3(0, 0, -0.07)
+size = Vector3(0.34, 0.018, 0.008)
+material = SubResource("Ink")
+
+[node name="Escritura_aviso_izquierdo_3" type="CSGBox3D" parent="."]
+position = Vector3(-0.53, 1.69, 0.076)
+rotation = Vector3(0, 0, -0.07)
+size = Vector3(0.27, 0.018, 0.008)
+material = SubResource("Ink")
+
+[node name="Escritura_aviso_central_1" type="CSGBox3D" parent="."]
+position = Vector3(0.05, 1.95, 0.076)
+rotation = Vector3(0, 0, 0.025)
+size = Vector3(0.27, 0.018, 0.008)
+material = SubResource("Ink")
+
+[node name="Escritura_aviso_central_2" type="CSGBox3D" parent="."]
+position = Vector3(0.05, 1.82, 0.076)
+rotation = Vector3(0, 0, 0.025)
+size = Vector3(0.31, 0.018, 0.008)
+material = SubResource("Ink")
+
+[node name="Escritura_aviso_central_3" type="CSGBox3D" parent="."]
+position = Vector3(0.05, 1.69, 0.076)
+rotation = Vector3(0, 0, 0.025)
+size = Vector3(0.23, 0.018, 0.008)
+material = SubResource("Ink")
+
+[node name="Remache_dorado_izquierdo" type="CSGBox3D" parent="."]
+position = Vector3(-1.09, 2.55, 0.15)
+size = Vector3(0.1, 0.1, 0.05)
+material = SubResource("Gold")
+
+[node name="Remache_dorado_derecho" type="CSGBox3D" parent="."]
+position = Vector3(1.09, 2.55, 0.15)
+size = Vector3(0.1, 0.1, 0.05)
+material = SubResource("Gold")

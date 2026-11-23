@@ -1,0 +1,35 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/props/escritorio_investigacion_medieval_3d.tscn" id="1_model"]
+
+[sub_resource type="Environment" id="StudioEnvironment"]
+background_mode = 1
+background_color = Color(0.12, 0.17, 0.24, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.67, 0.72, 0.82, 1)
+ambient_light_energy = 0.7
+
+[node name="VistaPrevia_Escritorio" type="Node3D"]
+
+[node name="Escritorio" parent="." instance=ExtResource("1_model")]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("StudioEnvironment")
+
+[node name="Luz_principal" type="DirectionalLight3D" parent="."]
+rotation = Vector3(-0.72, -0.55, 0.0)
+light_color = Color(1, 0.82, 0.61, 1)
+light_energy = 1.35
+shadow_enabled = true
+
+[node name="Luz_relleno" type="OmniLight3D" parent="."]
+position = Vector3(-2.0, 4.0, 3.5)
+light_color = Color(0.55, 0.72, 1, 1)
+light_energy = 2.0
+omni_range = 12.0
+
+[node name="Camera3D" type="Camera3D" parent="."]
+position = Vector3(5.1, 4.15, 8.4)
+rotation = Vector3(-0.22, 0.53, 0.0)
+current = true
+fov = 42.0

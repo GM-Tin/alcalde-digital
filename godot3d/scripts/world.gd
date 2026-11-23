@@ -15,6 +15,9 @@ const WORLD_VISIBILITY_DISTANCE := 145.0
 const WORLD_VISIBILITY_FADE := 18.0
 const FIREFLY_UPDATE_INTERVAL := 1.0 / 30.0
 const REQUIRED_INFO_CHESTS := 10
+const INFORMATION_BOARD_PAGE_THRESHOLDS: Array[int] = [4, 7, 10]
+const GUARDIAN8_REMOTE_INTERACTION_RANGE := 18.0
+const GUARDIAN8_REMOTE_HEIGHT_RANGE := 14.0
 const MAX_COOP_PLAYERS := 4
 const COOP_PORT := 7777
 const NPC_MOOD_DURATION := 90.0
@@ -27,12 +30,15 @@ const GAME_DURATION_SECONDS := 600.0
 const MENU_BACKGROUND_PATH := "res://assets/ui/medieval_menu_background.png"
 const MENU_BUTTONS_PATH := "res://assets/ui/medieval_buttons_atlas.png"
 const GAME_UI_ATLAS_PATH := "res://assets/ui/game_ui_atlas.png"
+const WHALE_PUZZLE_TEXTURE: Texture2D = preload("res://assets/ui/whale_puzzle.svg")
 const CARTOON_FONT: FontFile = preload("res://assets/ui/fonts/LilitaOne-Regular.ttf")
 const CHEST_PROGRESS_PATH := "user://chest_progress.cfg"
 const DAY_PHASE_DURATION := 240.0
 const CHEST_OPEN_SOUND_PATH := "res://assets/audio/chest_open.wav"
-const CHEST_NEAR_SOUND_PATH := "res://assets/audio/chest_near.mp3"
+const CHEST_NEAR_SOUND_PATH := "res://assets/audio/chest_near_loop.wav"
+const CHEST_NEAR_LOOP_START_SECONDS := 0.06
 const CHEST_PROXIMITY_RANGE := 8.0
+const INFORMATION_BOARD_SCENE := "res://scenes/props/tablon_anuncios_medieval_3d.tscn"
 const ROLE_MANAGER := preload("res://scripts/role_manager.gd")
 const JOURNALIST_CLAIMS := [
 	{"statement":"La alerta del cierre del centro comunitario incluye una fuente oficial verificable.", "is_true":false},
@@ -57,6 +63,7 @@ var hint: Label
 var hud: Label
 var panel: PanelContainer
 var panel_text: Label
+var panel_uses_q := false
 var question_index := -1
 var answered := 0
 var role_assignments: Array = []
@@ -81,6 +88,7 @@ var remote_players: Dictionary = {}
 var network_sync_elapsed := 0.0
 var interviewed_npcs: Dictionary = {}
 var informed_npcs: Dictionary = {}
+var journalist_has_documents := false
 var journalist_puzzle_npc := -1
 var journalist_puzzle_sequence: Array[int] = []
 var journalist_puzzle_input: Array[int] = []
@@ -103,6 +111,35 @@ var final_classification_summary := ""
 var stations: Array[Dictionary] = []
 var info_chests: Array[Dictionary] = []
 var npc_targets: Array[Dictionary] = []
+var guardian8: Node3D
+var guardian8_home_position := Vector3.ZERO
+var guardian8_bob_elapsed := 0.0
+var guardian8_animators: Array[AnimationPlayer] = []
+var guardian8_jump_animation_names: Array[String] = []
+var guardian8_mission_completed := false
+var guardian8_owner_peer_id := 0
+var guardian8_dialogue_pending := false
+var whale_puzzle_active := false
+var whale_puzzle_tiles: Array[int] = []
+var whale_puzzle_rotations: Array[int] = []
+var whale_puzzle_selected_cell := 0
+var whale_puzzle_held_tile := -1
+var whale_puzzle_held_rotation := 0
+var whale_puzzle_held_origin := -1
+var whale_puzzle_cells: Array[Button] = []
+var whale_puzzle_panel: PanelContainer
+var whale_puzzle_grid: GridContainer
+var whale_puzzle_title: Label
+var whale_puzzle_instructions: Label
+var fraud_guard_nodes: Dictionary = {}
+var fraud_guard7_spoken := false
+var fraud_letter_received := false
+var fraud_case_resolved := false
+var fraud_guard7_suspicion_stage := 0
+var fraud_wrong_suspicions := 0
+var fraud_owner_peer_id := 0
+var fraud_guard6_concern_played := false
+var npc_greeted: Dictionary = {}
 var npc_night_lights: Array[OmniLight3D] = []
 var chest_lights: Array[OmniLight3D] = []
 var chest_proximity_players: Array[Dictionary] = []
@@ -111,7 +148,8 @@ var firefly_lights: Array[OmniLight3D] = []
 var firefly_orbs: Array[MeshInstance3D] = []
 var firefly_time := 0.0
 var firefly_update_accumulator := 0.0
-var ticket_machine_position := Vector3(-10000, 0, 0)
+var ticket_terminal_position := Vector3(-10000, 0, 0)
+var research_desk_position := Vector3(-10000, 0, 0)
 var roulette_position := Vector3(-10000, 0, 0)
 var roulette_interaction_range := 6.0
 var roulette_node: Node3D
@@ -168,9 +206,16 @@ var day_sky: ShaderMaterial
 var day_cycle_elapsed := 0.0
 var day_phase_presets: Array[Dictionary] = []
 var chest_open_stream: AudioStreamWAV
-var chest_near_stream: AudioStreamMP3
+var chest_near_stream: AudioStreamWAV
 var collected_info: Dictionary = {}
 var info_delivered := false
+var board_pages_placed := 0
+var chest_letter: StaticBody3D
+var chest_letter_start_transform := Transform3D.IDENTITY
+var pending_card_chest_index := -1
+var pending_card_clue := ""
+var hero_is_carrying_card := false
+var card_carrier_peer_id := 0
 var questions := [
 	{"title":"El mensaje viral", "body":"Un mensaje afirma que cerrarán el centro comunitario. No cita ninguna fuente. ¿Qué haces?", "answers":["Lo reenvío ya", "Busco una fuente oficial", "Lo cambio para que asuste más"], "correct":1, "fact":"Verificar en canales oficiales evita que un rumor se convierta en una alarma."},
 	{"title":"La encuesta", "body":"Una encuesta solo preguntó a tus tres amigos. ¿Representa a todo el barrio?", "answers":["Sí, es suficiente", "No, la muestra es muy pequeña", "Solo si la publico muchas veces"], "correct":1, "fact":"Una muestra pequeña o sesgada no describe a toda la comunidad."},
@@ -188,6 +233,8 @@ func _ready() -> void:
 		# imported asset instances without a collider, preserving the edited layout.
 		_repair_asset_collisions(self)
 		_build_environment_dressing()
+		_ensure_missing_tree_collisions(self)
+		_ensure_information_board()
 		_build_editor_npcs()
 		return
 	_build_loading_screen()
@@ -199,14 +246,22 @@ func _ready() -> void:
 	active_role = String(local_roles[active_role_index])
 	_repair_asset_collisions(self)
 	_build_environment_dressing()
+	_ensure_missing_tree_collisions(self)
+	_ensure_information_board()
+	_set_board_pages_placed(board_pages_placed)
 	_scale_map_up()
+	_setup_chest_letter()
+	_find_research_desk()
 	_optimize_static_visuals()
 	# Let the physics server register saved geometry before placing guards on clear ground.
 	await get_tree().physics_frame
 	_setup_npcs()
+	_setup_fraud_case_npcs()
+	_setup_guardia_08()
+	_setup_guardia_07_writer()
 	_load_chest_open_sound()
 	_discover_information_chests()
-	_find_ticket_machine()
+	_find_ticket_terminal()
 	_find_roulette()
 	_setup_day_night_cycle()
 	_setup_fireflies()
@@ -235,6 +290,34 @@ func _set_scene_owners(node: Node, scene_root: Node) -> void:
 	for child in node.get_children():
 		child.owner = scene_root
 		_set_scene_owners(child, scene_root)
+
+func _ensure_information_board() -> void:
+	if get_node_or_null("Tablon_Informacion") != null:
+		return
+	var packed_board := load(INFORMATION_BOARD_SCENE) as PackedScene
+	if packed_board == null:
+		push_warning("No pude cargar el tablón medieval de información.")
+		return
+	var board := packed_board.instantiate() as Node3D
+	if board == null:
+		push_warning("La escena del tablón no tiene una raíz Node3D.")
+		return
+	board.name = "Tablon_Informacion"
+	board.position = Vector3(60.2522, 0.0, -0.52175903)
+	board.set_meta("information_board", true)
+	board.set_meta("ticket_terminal", true)
+	add_child(board)
+	if Engine.is_editor_hint():
+		var scene_root := get_tree().edited_scene_root
+		if scene_root != null:
+			_set_scene_owners(board, scene_root)
+			board.owner = scene_root
+
+func _set_board_pages_placed(count: int) -> void:
+	board_pages_placed = clampi(count, 0, INFORMATION_BOARD_PAGE_THRESHOLDS.size())
+	var board := get_node_or_null("Tablon_Informacion")
+	if board != null and board.has_method("set_pages_placed"):
+		board.call("set_pages_placed", board_pages_placed)
 
 func _scale_map_up() -> void:
 	if has_meta("expanded_map_applied"):
@@ -410,6 +493,40 @@ func _is_tree_or_stone_mesh(graphic: MeshInstance3D) -> bool:
 		node = node.get_parent()
 	return false
 
+func _ensure_missing_tree_collisions(root: Node) -> void:
+	# Hand-placed trees added in the editor can be loose MeshInstance3D nodes
+	# without the fitted collider children that imported tree scenes already have.
+	for candidate in root.find_children("*", "MeshInstance3D", true, false):
+		var graphic := candidate as MeshInstance3D
+		if graphic == null or graphic.mesh == null or not _is_tree_mesh(graphic):
+			continue
+		var parent_node := graphic.get_parent()
+		if parent_node == null:
+			continue
+		var collider_name := String(graphic.name) + "_FittedConvexCollider"
+		if parent_node.get_node_or_null(NodePath(collider_name)) != null:
+			continue
+		var ancestor := parent_node
+		var has_parent_collision := false
+		while ancestor != null and ancestor != root:
+			if ancestor is StaticBody3D:
+				has_parent_collision = true
+				break
+			ancestor = ancestor.get_parent()
+		if not has_parent_collision:
+			_add_convex_object_collision(graphic)
+
+func _is_tree_mesh(graphic: MeshInstance3D) -> bool:
+	var node: Node = graphic
+	while node != null:
+		var key := String(node.name).to_lower()
+		if node is Node3D:
+			key += " " + (node as Node3D).scene_file_path.to_lower()
+		if key.contains("tree") or key.contains("pine") or key.contains("arbol") or key.contains("árbol"):
+			return true
+		node = node.get_parent()
+	return false
+
 func _is_block_mesh(graphic: MeshInstance3D) -> bool:
 	return _has_asset_keyword(graphic, ["block"])
 
@@ -545,6 +662,7 @@ func _process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
 	if game_running:
+		_update_guardia_08_hop(delta)
 		_update_npc_moods(delta)
 		_update_npc_facing(delta)
 		_update_bard_cheer(delta)
@@ -569,6 +687,23 @@ func _process(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	# Keep gameplay controls completely inactive while any menu or lobby is open.
 	if not game_running:
+		return
+	if whale_puzzle_active:
+		if event is InputEventKey and event.pressed and not event.echo:
+			if event.keycode in [KEY_SHIFT, KEY_CAPSLOCK] or event.physical_keycode in [KEY_SHIFT, KEY_CAPSLOCK]:
+				_rotate_whale_puzzle_tile(whale_puzzle_selected_cell, 1)
+			else:
+				match event.keycode:
+					KEY_LEFT: _move_whale_puzzle_cursor(-1, 0)
+					KEY_RIGHT: _move_whale_puzzle_cursor(1, 0)
+					KEY_UP: _move_whale_puzzle_cursor(0, -1)
+					KEY_DOWN: _move_whale_puzzle_cursor(0, 1)
+					KEY_SPACE: _toggle_whale_puzzle_pickup()
+			get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE and guardian8_dialogue_pending:
+		_close_question()
+		get_viewport().set_input_as_handled()
 		return
 	if game_running and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB:
 		_cycle_solo_role()
@@ -597,19 +732,47 @@ func _unhandled_input(event: InputEvent) -> void:
 		_show_restart_confirmation()
 		get_viewport().set_input_as_handled()
 		return
-	if event.is_action_pressed("interact"):
+	if event.is_action_pressed("extra_mission"):
+		if whale_puzzle_active:
+			get_viewport().set_input_as_handled()
+			return
 		if panel != null and panel.visible:
-			_close_question()
+			if panel_uses_q:
+				_close_question()
+			get_viewport().set_input_as_handled()
 		else:
-			var target := _nearest_interaction_target()
-			if active_role == "Influencer" and not influencer_has_information and String(target.get("kind", "")) == "npc":
-				var npc_index := int(target.npc_index)
-				if float(bard_cooldowns.get(npc_index, 0.0)) <= 0.0:
-					bard_cheer_target = npc_index
-					bard_cheer_elapsed = 0.0
+			var extra_target := _nearest_interaction_target()
+			if String(extra_target.get("kind", "")) == "guardian8":
+				_start_guardian8_interaction()
 				get_viewport().set_input_as_handled()
 				return
-			_open_nearest_station()
+			if String(extra_target.get("kind", "")) == "fraud_npc" or (fraud_letter_received and String(extra_target.get("kind", "")) == "npc"):
+				_open_nearest_station()
+				get_viewport().set_input_as_handled()
+				return
+			get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed("interact"):
+		if whale_puzzle_active:
+			get_viewport().set_input_as_handled()
+			return
+		if panel != null and panel.visible:
+			if not panel_uses_q and not guardian8_dialogue_pending:
+				_close_question()
+			get_viewport().set_input_as_handled()
+			return
+		var interaction_target := _nearest_interaction_target(true)
+		if String(interaction_target.get("kind", "")) in ["guardian8", "fraud_npc"] or (fraud_letter_received and String(interaction_target.get("kind", "")) == "npc"):
+			get_viewport().set_input_as_handled()
+			return
+		if active_role == "Influencer" and not influencer_has_information and not fraud_letter_received and String(interaction_target.get("kind", "")) == "npc":
+			var npc_index := int(interaction_target.npc_index)
+			if float(bard_cooldowns.get(npc_index, 0.0)) <= 0.0:
+				bard_cheer_target = npc_index
+				bard_cheer_elapsed = 0.0
+			get_viewport().set_input_as_handled()
+			return
+		_open_nearest_station(true)
 	elif question_index >= 0 and event is InputEventKey and event.pressed and not event.echo:
 		var num: int = event.keycode - KEY_1
 		if num >= 0 and num <= 2:
@@ -650,13 +813,24 @@ func _build_world() -> void:
 		_build_continuous_zone(zone, float(zone) * ZONE_LENGTH)
 	# One learning station sits near the far end of each continuous biome.
 	stations = [
-		{"position":Vector3(66, 0, 0), "model":ARCADE + "ticket-machine.glb", "title":"Estación de verificación"},
+		{"position":Vector3(66, 0, 0), "model":INFORMATION_BOARD_SCENE, "title":"Tablón de información"},
 		{"position":Vector3(138, 0, 0), "model":ARCADE + "prize-wheel.glb", "title":"Estación de datos"},
 		{"position":Vector3(210, 0, 0), "model":DUNGEON + "chest.glb", "title":"Estación de propuestas"}
 	]
 	for i in range(stations.size()):
 		var st: Dictionary = stations[i]
-		var station_model := _add_model(st.model, st.position, Vector3(2.5, 2.5, 2.5), self, true)
+		var station_model: Node3D
+		if String(st.model).to_lower().ends_with(".tscn"):
+			var station_scene := load(String(st.model)) as PackedScene
+			station_model = station_scene.instantiate() as Node3D if station_scene != null else null
+			if station_model != null:
+				station_model.name = "Tablon_Informacion"
+				station_model.position = st.position
+				station_model.set_meta("information_board", true)
+				station_model.set_meta("ticket_terminal", true)
+				add_child(station_model)
+		else:
+			station_model = _add_model(st.model, st.position, Vector3(2.5, 2.5, 2.5), self, true)
 		if station_model != null and String(st.model).to_lower().contains("chest.glb"):
 			station_model.set_meta("non_information_chest", true)
 		_add_glow_marker(st.position + Vector3(0, 1.8, 0))
@@ -673,7 +847,7 @@ func _npc_specs() -> Array[Dictionary]:
 		{"name":"Guardia_02", "position":Vector3(19.0, 0, 0), "dialogue":"Revisa la fecha para saber si la información sigue vigente."},
 		{"name":"Guardia_03", "position":Vector3(30.0, 0, 0), "dialogue":"Compara las cifras con documentos públicos."},
 		{"name":"Guardia_04", "position":Vector3(43.0, 0, 6.0), "dialogue":"Pregunta cuántas personas participaron en la encuesta."},
-		{"name":"Guardia_05", "position":Vector3(58.0, 0, 0), "dialogue":"Cuando reúnas las fichas de todos los cofres, llévalas a la máquina de tickets."}
+		{"name":"Guardia_05", "position":Vector3(58.0, 0, 0), "dialogue":"Cuando recojas una carta, llévala al tablón de información antes de buscar la siguiente."}
 	]
 
 func _build_editor_npcs() -> void:
@@ -754,6 +928,181 @@ func _setup_npcs() -> void:
 		var animator := _play_guard_idle_animations(npc)
 		var mood_bar := _create_npc_mood_bar(npc)
 		npc_targets.append({"node":npc, "position":npc.global_position, "name":npc_name, "mood":1.0, "seconds_left":npc_mood_duration, "recharging":false, "recharge_elapsed":0.0, "animator":animator, "bar":mood_bar, "index":i})
+
+func _setup_fraud_case_npcs() -> void:
+	fraud_guard_nodes.clear()
+	for guard_name in ["Guardia_06", "Guardia_07"]:
+		var guard := get_node_or_null(NodePath(guard_name)) as Node3D
+		if guard != null:
+			fraud_guard_nodes[guard_name] = guard
+			guard.set_meta("fraud_case_guard", true)
+			guard.set_meta("npc_dialogue", "Vecino de guardia. Tiene una historia que contar.")
+
+func _setup_guardia_07_writer() -> void:
+	# Guardia 7 is the letter writer; preserve the map-authored position.
+	var writer := fraud_guard_nodes.get("Guardia_07") as Node3D
+	if writer == null:
+		return
+	# Face the writing surface while preserving the map-authored position.
+	writer.rotation.y = 0.85 + PI
+	_play_guard_idle_animations(writer)
+	_attach_writing_quill(writer)
+	for candidate in writer.find_children("*", "AnimationPlayer", true, false):
+		var animator := candidate as AnimationPlayer
+		if animator == null:
+			continue
+		var writing_animation_name := ""
+		for animation_name in animator.get_animation_list():
+			if String(animation_name).to_lower() == "interact-right":
+				writing_animation_name = String(animation_name)
+				break
+		if writing_animation_name.is_empty():
+			continue
+		var writing_animation := animator.get_animation(writing_animation_name)
+		if writing_animation != null:
+			writing_animation.loop_mode = Animation.LOOP_LINEAR
+		animator.speed_scale = 0.7
+		animator.play(writing_animation_name, 0.15)
+
+func _setup_guardia_08() -> void:
+	guardian8 = get_node_or_null("Guardia_08") as Node3D
+	guardian8_animators.clear()
+	guardian8_jump_animation_names.clear()
+	if guardian8 == null:
+		push_warning("No se encontró Guardia_08 en la escena activa; su mini misión quedará deshabilitada.")
+		return
+	guardian8_home_position = guardian8.global_position
+	for candidate in guardian8.find_children("*", "AnimationPlayer", true, false):
+		var animator := candidate as AnimationPlayer
+		if animator == null:
+			continue
+		var jump_name := ""
+		for animation_name in animator.get_animation_list():
+			if String(animation_name).to_lower().contains("jump"):
+				jump_name = String(animation_name)
+				break
+		if not jump_name.is_empty():
+			var jump_animation := animator.get_animation(jump_name)
+			if jump_animation != null:
+				jump_animation.loop_mode = Animation.LOOP_LINEAR
+			guardian8_animators.append(animator)
+			guardian8_jump_animation_names.append(jump_name)
+
+func _start_guardia_08_hop() -> void:
+	guardian8_bob_elapsed = 0.0
+	for index in range(mini(guardian8_animators.size(), guardian8_jump_animation_names.size())):
+		var animator := guardian8_animators[index]
+		if is_instance_valid(animator):
+			animator.speed_scale = 0.82
+			animator.play(guardian8_jump_animation_names[index])
+
+func _update_guardia_08_hop(delta: float) -> void:
+	if guardian8 == null or not is_instance_valid(guardian8):
+		return
+	if guardian8_mission_completed:
+		guardian8.global_position = guardian8_home_position
+		return
+	guardian8_bob_elapsed += delta
+	# Keep the loop small and in place: it reads as an anxious bounce, without
+	# animating a fall or moving the character toward an edge.
+	guardian8.global_position = guardian8_home_position + Vector3.UP * absf(sin(guardian8_bob_elapsed * TAU * 0.85)) * 0.18
+
+func _play_guard_concern_animation(guard: Node3D) -> void:
+	if guard == null or not is_instance_valid(guard):
+		return
+	var animators: Array[AnimationPlayer] = []
+	var longest_duration := 0.0
+	for candidate in guard.find_children("*", "AnimationPlayer", true, false):
+		var animator := candidate as AnimationPlayer
+		if animator == null:
+			continue
+		var concern_name := ""
+		for animation_name in animator.get_animation_list():
+			if String(animation_name).to_lower() in ["emote-no", "emote_no", "worried", "concern"]:
+				concern_name = String(animation_name)
+				break
+		if concern_name.is_empty():
+			continue
+		var concern_animation := animator.get_animation(concern_name)
+		if concern_animation == null:
+			continue
+		concern_animation.loop_mode = Animation.LOOP_NONE
+		animator.speed_scale = 0.8
+		animator.play(concern_name, 0.12)
+		animators.append(animator)
+		longest_duration = maxf(longest_duration, concern_animation.length / 0.8)
+	if animators.is_empty():
+		_play_guard_idle_animations(guard)
+		return
+	await get_tree().create_timer(longest_duration).timeout
+	for animator in animators:
+		if not is_instance_valid(animator):
+			continue
+		animator.speed_scale = 1.0
+		for animation_name in animator.get_animation_list():
+			if String(animation_name).to_lower().contains("idle"):
+				animator.play(String(animation_name), 0.12)
+				break
+
+func _attach_writing_quill(writer: Node3D) -> void:
+	var skeletons := writer.find_children("*", "Skeleton3D", true, false)
+	if skeletons.is_empty():
+		return
+	var skeleton := skeletons[0] as Skeleton3D
+	if skeleton == null or skeleton.find_bone("arm-right") < 0:
+		return
+	if skeleton.get_node_or_null("Pluma_en_mano") != null:
+		return
+	var attachment := BoneAttachment3D.new()
+	attachment.name = "Pluma_en_mano"
+	attachment.bone_name = "arm-right"
+	skeleton.add_child(attachment)
+	var pen := Node3D.new()
+	pen.name = "Pluma_de_escritura"
+	pen.position = Vector3(-0.12, -0.09, 0.02)
+	pen.rotation.z = -0.68
+	attachment.add_child(pen)
+	var feather_material := StandardMaterial3D.new()
+	feather_material.albedo_color = Color("6b3b22")
+	feather_material.roughness = 0.72
+	var shaft_material := StandardMaterial3D.new()
+	shaft_material.albedo_color = Color("c9923f")
+	shaft_material.metallic = 0.35
+	shaft_material.roughness = 0.38
+	var feather_mesh := SphereMesh.new()
+	feather_mesh.radius = 0.045
+	feather_mesh.height = 0.19
+	feather_mesh.radial_segments = 8
+	feather_mesh.rings = 4
+	var feather := MeshInstance3D.new()
+	feather.name = "Plumon"
+	feather.mesh = feather_mesh
+	feather.material_override = feather_material
+	feather.position = Vector3(0.015, 0.09, 0)
+	feather.scale = Vector3(0.55, 1.0, 0.12)
+	pen.add_child(feather)
+	var shaft_mesh := CylinderMesh.new()
+	shaft_mesh.top_radius = 0.006
+	shaft_mesh.bottom_radius = 0.012
+	shaft_mesh.height = 0.25
+	shaft_mesh.radial_segments = 6
+	var shaft := MeshInstance3D.new()
+	shaft.name = "Varilla"
+	shaft.mesh = shaft_mesh
+	shaft.material_override = shaft_material
+	pen.add_child(shaft)
+	var tip_mesh := CylinderMesh.new()
+	tip_mesh.top_radius = 0.0
+	tip_mesh.bottom_radius = 0.012
+	tip_mesh.height = 0.045
+	tip_mesh.radial_segments = 6
+	var tip := MeshInstance3D.new()
+	tip.name = "Punta"
+	tip.mesh = tip_mesh
+	tip.material_override = shaft_material
+	tip.position = Vector3(0, -0.145, 0)
+	tip.rotation.z = PI
+	pen.add_child(tip)
 
 func _find_clear_guard_position(desired: Vector3, reserved_positions: Array[Vector3]) -> Vector3:
 	var space := get_world_3d().direct_space_state
@@ -941,6 +1290,78 @@ func _cheer_npc(npc_index: int, strength: float = 1.0) -> void:
 	_update_information_hud()
 	_broadcast_coop_state()
 
+func _setup_chest_letter() -> void:
+	chest_letter = get_node_or_null("Sobre_Medieval_3D") as StaticBody3D
+	if chest_letter == null:
+		push_warning("No encontré el sobre medieval del spawn para usarlo como carta de los cofres.")
+		return
+	chest_letter_start_transform = chest_letter.global_transform
+	chest_letter.collision_layer = 0
+	chest_letter.collision_mask = 0
+	for candidate in chest_letter.find_children("*", "CollisionShape3D", true, false):
+		(candidate as CollisionShape3D).disabled = true
+	chest_letter.visible = false
+
+func _place_chest_letter_at(index: int) -> void:
+	if chest_letter == null or index < 0 or index >= info_chests.size():
+		return
+	var chest := info_chests[index].node as Node3D
+	if not is_instance_valid(chest):
+		return
+	var bounds := _world_visual_bounds(chest)
+	var letter_position := Vector3(bounds.get_center().x, bounds.end.y + 0.36, bounds.get_center().z)
+	var letter_yaw := chest.global_rotation.y + PI * 0.5
+	var letter_basis := Basis(Vector3.UP, letter_yaw).scaled(Vector3.ONE * MAP_SCALE)
+	if chest_letter.get_parent() != self:
+		chest_letter.reparent(self, false)
+	chest_letter.global_transform = Transform3D(letter_basis, letter_position)
+	chest_letter.visible = true
+
+func _pick_up_chest_letter() -> void:
+	if chest_letter == null or pending_card_chest_index < 0 or hero_is_carrying_card:
+		return
+	chest_letter.reparent(player, false)
+	chest_letter.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.32), Vector3(0.34, 0.82, -0.52))
+	hero_is_carrying_card = true
+	card_carrier_peer_id = multiplayer.get_unique_id() if multiplayer.multiplayer_peer != null else 1
+	_update_information_hud()
+	_broadcast_coop_state()
+
+func _return_chest_letter_to_spawn() -> void:
+	if chest_letter == null:
+		return
+	if chest_letter.get_parent() != self:
+		chest_letter.reparent(self, false)
+	chest_letter.transform = chest_letter_start_transform
+	chest_letter.visible = false
+
+func _deliver_chest_letter_to_board() -> void:
+	if pending_card_chest_index < 0 or collected_info.has(pending_card_chest_index):
+		return
+	collected_info[pending_card_chest_index] = pending_card_clue
+	answered = collected_info.size()
+	hero_is_carrying_card = false
+	card_carrier_peer_id = 0
+	var delivered_count := collected_info.size()
+	var earned_pages := 0
+	for threshold in INFORMATION_BOARD_PAGE_THRESHOLDS:
+		if delivered_count >= threshold:
+			earned_pages += 1
+	_set_board_pages_placed(earned_pages)
+	info_delivered = earned_pages >= INFORMATION_BOARD_PAGE_THRESHOLDS.size()
+	_return_chest_letter_to_spawn()
+	if info_delivered:
+		panel_text.text = "✓   CARTA ENTREGADA · TABLÓN COMPLETO\n\nYa colocaste las 10 cartas, una por una. El Mensajero puede recoger el expediente y llevarlo al escritorio de investigación."
+	elif earned_pages > 0 and delivered_count in INFORMATION_BOARD_PAGE_THRESHOLDS:
+		panel_text.text = "✓   CARTA COLOCADA\n\nLa hoja %d de 3 apareció en el tablón. Cartas entregadas: %d / %d." % [earned_pages, delivered_count, REQUIRED_INFO_CHESTS]
+	else:
+		panel_text.text = "✓   CARTA COLOCADA\n\nCartas entregadas: %d / %d. Vuelve a un cofre para abrirlo y recoger la siguiente." % [delivered_count, REQUIRED_INFO_CHESTS]
+	pending_card_chest_index = -1
+	pending_card_clue = ""
+	panel.visible = true
+	_update_information_hud()
+	_broadcast_coop_state()
+
 func _discover_information_chests() -> void:
 	info_chests.clear()
 	chest_lights.clear()
@@ -987,12 +1408,12 @@ func _setup_chest_proximity_sound(chest: Node3D) -> void:
 	if sound == null:
 		sound = AudioStreamPlayer3D.new()
 		sound.name = "ChestProximitySoundPlayer"
-		sound.stream = chest_near_stream
 		sound.volume_db = -12.0
 		sound.unit_size = 4.0
 		sound.max_distance = CHEST_PROXIMITY_RANGE
 		sound.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
 		chest.add_child(sound)
+	sound.stream = chest_near_stream
 	if not chest_proximity_players.any(func(item: Dictionary) -> bool: return item.node == chest):
 		chest_proximity_players.append({"node":chest, "player":sound, "index":-1})
 
@@ -1049,15 +1470,26 @@ func _save_opened_chest(index: int) -> void:
 	save.set_value("progress", "opened_chests", opened)
 	save.save(CHEST_PROGRESS_PATH)
 
-func _find_ticket_machine() -> void:
+func _find_ticket_terminal() -> void:
 	var candidates := find_children("*", "Node3D", true, false)
 	for candidate in candidates:
 		var node := candidate as Node3D
-		if node.scene_file_path.to_lower().contains("ticket-machine.glb") or node.name.to_lower().contains("ticket-machine"):
-			ticket_machine_position = node.global_position
+		if bool(node.get_meta("ticket_terminal", false)) or bool(node.get_meta("information_board", false)):
+			ticket_terminal_position = node.global_position
 			return
 	if not stations.is_empty():
-		ticket_machine_position = stations[0].position
+		ticket_terminal_position = stations[0].position
+
+func _find_research_desk() -> void:
+	var desk := get_node_or_null("Escritorio_Investigacion") as Node3D
+	if desk == null:
+		for candidate in find_children("*", "Node3D", true, false):
+			var node := candidate as Node3D
+			if bool(node.get_meta("research_desk", false)) or node.name.to_lower().contains("escritorio_investigacion"):
+				desk = node
+				break
+	if desk != null:
+		research_desk_position = desk.global_position
 
 func _find_roulette() -> void:
 	roulette_node = get_node_or_null("prize-wheel2") as Node3D
@@ -1845,6 +2277,7 @@ func _set_gameplay_ui_visible(visible_now: bool) -> void:
 	elif is_instance_valid(prompt): prompt.visible = visible_now
 	if is_instance_valid(panel): panel.visible = false
 	if is_instance_valid(network_panel): network_panel.visible = false
+	if not visible_now and is_instance_valid(whale_puzzle_panel): whale_puzzle_panel.visible = false
 
 func _show_menu_page(page: String) -> void:
 	if not is_instance_valid(menu_root):
@@ -2464,7 +2897,14 @@ func _receive_match_start() -> void:
 
 func _reset_match_state() -> void:
 	collected_info.clear()
+	hero_is_carrying_card = false
+	pending_card_chest_index = -1
+	pending_card_clue = ""
+	card_carrier_peer_id = 0
+	_return_chest_letter_to_spawn()
 	info_delivered = false
+	journalist_has_documents = false
+	_set_board_pages_placed(0)
 	interviewed_npcs.clear()
 	informed_npcs.clear()
 	cheered_npcs.clear()
@@ -2488,6 +2928,26 @@ func _reset_match_state() -> void:
 	influencer_delivery_queue.clear()
 	influencer_delivery_cursor = 0
 	shared_info_by_npc.clear()
+	fraud_guard7_spoken = false
+	fraud_letter_received = false
+	fraud_case_resolved = false
+	fraud_guard7_suspicion_stage = 0
+	fraud_wrong_suspicions = 0
+	fraud_owner_peer_id = 0
+	fraud_guard6_concern_played = false
+	guardian8_mission_completed = false
+	guardian8_owner_peer_id = 0
+	guardian8_dialogue_pending = false
+	whale_puzzle_active = false
+	whale_puzzle_tiles.clear()
+	whale_puzzle_rotations.clear()
+	whale_puzzle_held_tile = -1
+	whale_puzzle_held_origin = -1
+	if is_instance_valid(whale_puzzle_panel):
+		whale_puzzle_panel.visible = false
+	if guardian8 != null and is_instance_valid(guardian8):
+		guardian8.global_position = guardian8_home_position
+	npc_greeted.clear()
 	final_classification_summary = ""
 	answered = 0
 	roulette_used = false
@@ -2519,6 +2979,7 @@ func _launch_game() -> void:
 	gameplay_started = true
 	game_running = true
 	game_timer_timeout = false
+	_start_guardia_08_hop()
 	day_cycle_elapsed = 0.0
 	if is_instance_valid(player):
 		var safe_spawn := _find_safe_spawn()
@@ -2637,6 +3098,8 @@ func _check_game_completion() -> void:
 	all_objectives_complete = all_objectives_complete and interviewed_npcs.size() == npc_targets.size() and journalist_verified
 	all_objectives_complete = all_objectives_complete and informed_npcs.size() == npc_targets.size()
 	all_objectives_complete = all_objectives_complete and influencer_delivery_cursor >= influencer_delivery_queue.size() and cheered_npcs.size() == npc_targets.size()
+	all_objectives_complete = all_objectives_complete and fraud_case_resolved
+	all_objectives_complete = all_objectives_complete and guardian8_mission_completed
 	if all_objectives_complete:
 		if journalist_correct_classifications == JOURNALIST_CLAIMS.size():
 			final_classification_summary = "FINAL LIMPIO · El Mensajero clasificó correctamente los diez datos. Solo la información verdadera llegó a los vecinos."
@@ -2720,7 +3183,7 @@ func _build_ui() -> void:
 	_style_panel(bottom, Color("171d2b"), Color("526c83"))
 	var bottom_label := Label.new()
 	bottom_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	bottom_label.text = "WASD mover · Ratón mirar · ESPACIO saltar · E interactuar · TAB cambiar rol"
+	bottom_label.text = "WASD mover · Ratón mirar · ESPACIO saltar · E interactuar · Q misiones extra · TAB cambiar rol"
 	bottom_label.visible = false
 	_style_cartoon_text(bottom_label, 17)
 	bottom.add_child(bottom_label)
@@ -2776,6 +3239,7 @@ func _build_ui() -> void:
 	margin.add_child(panel_text)
 	panel.add_child(margin)
 	layer.add_child(panel)
+	_build_whale_puzzle_ui(layer)
 	network_panel = PanelContainer.new()
 	network_panel.set_anchors_preset(Control.PRESET_CENTER)
 	network_panel.position = Vector2(-250, -145)
@@ -3093,15 +3557,24 @@ func _role_display_name(role: String) -> String:
 func _role_mission(role: String) -> String:
 	match role:
 		"Ciudadano":
-			return "Reúne y entrega fichas: %d/%d" % [mini(collected_info.size(), REQUIRED_INFO_CHESTS), REQUIRED_INFO_CHESTS]
+			if info_delivered: return "Cartas entregadas: 10/10 · tablón completo"
+			if hero_is_carrying_card: return "Lleva la carta al tablón · %d/10" % mini(collected_info.size(), REQUIRED_INFO_CHESTS)
+			if pending_card_chest_index >= 0: return "Recoge la carta del cofre y llévala al tablón · %d/10" % mini(collected_info.size(), REQUIRED_INFO_CHESTS)
+			return "Abre un cofre, recoge su carta y entrégala · %d/10" % mini(collected_info.size(), REQUIRED_INFO_CHESTS)
 		"Periodista":
 			if journalist_verified: return "Información verificada"
-			if info_delivered: return "Escanea los datos: %d/%d" % [maxi(journalist_claim_index, 0), journalist_claims.size()]
-			return "Entrevista vecinos: %d/%d" % [interviewed_npcs.size(), npc_targets.size()]
+			if not info_delivered: return "Entrevista vecinos: %d/%d · espera el tablón" % [interviewed_npcs.size(), npc_targets.size()]
+			if not journalist_has_documents: return "Recoge el expediente del tablón y llévalo al escritorio"
+			if interviewed_npcs.size() < npc_targets.size(): return "Entrevista vecinos: %d/%d" % [interviewed_npcs.size(), npc_targets.size()]
+			return "Analiza los datos en el escritorio: %d/%d" % [maxi(journalist_claim_index, 0), journalist_claims.size()]
 		"Influencer":
+			if not guardian8_mission_completed:
+				return "Intervén con Guardia 8: completa el rompecabezas" if guardian8_owner_peer_id == 0 or _is_guardian8_event_owner() else "Guardia 8: otro jugador se encarga"
 			if not influencer_has_information: return "Espera la información del Mensajero"
 			return "Difunde datos verificados: %d/%d" % [influencer_delivery_cursor, influencer_delivery_queue.size()]
 		"Candidato a alcalde":
+			if not guardian8_mission_completed:
+				return "Intervén con Guardia 8: completa el rompecabezas" if guardian8_owner_peer_id == 0 or _is_guardian8_event_owner() else "Guardia 8: otro jugador se encarga"
 			return "Anima a vecinos: %d/%d" % [cheered_npcs.size(), npc_targets.size()]
 		_: return "Completa tu misión"
 
@@ -3337,6 +3810,10 @@ func _receive_remote_transform(peer_id: int, position: Vector3, yaw: float) -> v
 		remote_players[peer_id] = avatar
 	avatar.global_position = position
 	avatar.rotation.y = yaw
+	if hero_is_carrying_card and card_carrier_peer_id == peer_id and chest_letter != null:
+		chest_letter.reparent(avatar, false)
+		chest_letter.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.32), Vector3(0.34, 0.82, -0.52))
+		chest_letter.visible = true
 
 func _broadcast_coop_state() -> void:
 	if multiplayer.multiplayer_peer == null:
@@ -3344,6 +3821,8 @@ func _broadcast_coop_state() -> void:
 	var state := {
 		"collected": collected_info,
 		"delivered": info_delivered,
+		"board_pages": board_pages_placed,
+		"journalist_has_documents": journalist_has_documents,
 		"interviewed": interviewed_npcs.keys(),
 		"informed": informed_npcs.keys(),
 		"delivery_queue": influencer_delivery_queue,
@@ -3352,10 +3831,24 @@ func _broadcast_coop_state() -> void:
 		"verified_info": journalist_validated_info,
 		"cheered": cheered_npcs.keys(),
 		"moods": npc_targets.map(func(npc_state: Dictionary) -> float: return float(npc_state.mood)),
+		"pending_card_index": pending_card_chest_index,
+		"pending_card_clue": pending_card_clue,
+		"carrying_card": hero_is_carrying_card,
+		"card_carrier_peer": card_carrier_peer_id,
 		"verified": journalist_verified,
 		"correct_classifications": journalist_correct_classifications,
 		"rejected_false": journalist_rejected_false_count,
-		"influencer_has_information": influencer_has_information
+		"influencer_has_information": influencer_has_information,
+		"fraud_guard7_spoken": fraud_guard7_spoken,
+		"fraud_letter_received": fraud_letter_received,
+		"fraud_case_resolved": fraud_case_resolved,
+		"fraud_guard7_suspicion_stage": fraud_guard7_suspicion_stage,
+		"fraud_wrong_suspicions": fraud_wrong_suspicions,
+		"fraud_owner_peer_id": fraud_owner_peer_id,
+		"fraud_guard6_concern_played": fraud_guard6_concern_played,
+		"guardian8_mission_completed": guardian8_mission_completed,
+		"guardian8_owner_peer_id": guardian8_owner_peer_id,
+		"game_time_remaining": game_time_remaining
 	}
 	rpc("_receive_coop_state", state)
 
@@ -3368,11 +3861,56 @@ func _receive_coop_state(state: Dictionary) -> void:
 				var chest := info_chests[int(key)].node as Node3D
 				_stop_chest_proximity_sound(chest)
 				_open_chest_visual(chest)
-	info_delivered = info_delivered or bool(state.get("delivered", false))
+	pending_card_chest_index = int(state.get("pending_card_index", pending_card_chest_index))
+	pending_card_clue = String(state.get("pending_card_clue", pending_card_clue))
+	hero_is_carrying_card = bool(state.get("carrying_card", hero_is_carrying_card))
+	card_carrier_peer_id = int(state.get("card_carrier_peer", card_carrier_peer_id))
+	if pending_card_chest_index < 0:
+		_return_chest_letter_to_spawn()
+	elif hero_is_carrying_card:
+		var carrier: Node3D = player if card_carrier_peer_id == multiplayer.get_unique_id() else remote_players.get(card_carrier_peer_id) as Node3D
+		if carrier != null and is_instance_valid(carrier):
+			chest_letter.reparent(carrier, false)
+			chest_letter.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.32), Vector3(0.34, 0.82, -0.52))
+			chest_letter.visible = true
+		else:
+			chest_letter.visible = false
+	else:
+		if pending_card_chest_index >= 0 and pending_card_chest_index < info_chests.size():
+			var open_chest := info_chests[pending_card_chest_index].node as Node3D
+			_stop_chest_proximity_sound(open_chest)
+			_open_chest_visual(open_chest)
+		_place_chest_letter_at(pending_card_chest_index)
+	_set_board_pages_placed(maxi(board_pages_placed, int(state.get("board_pages", 0))))
+	info_delivered = board_pages_placed >= INFORMATION_BOARD_PAGE_THRESHOLDS.size() or info_delivered or bool(state.get("delivered", false))
+	journalist_has_documents = journalist_has_documents or bool(state.get("journalist_has_documents", false))
 	journalist_verified = journalist_verified or bool(state.get("verified", false))
 	journalist_correct_classifications = maxi(journalist_correct_classifications, int(state.get("correct_classifications", 0)))
 	journalist_rejected_false_count = maxi(journalist_rejected_false_count, int(state.get("rejected_false", 0)))
 	influencer_has_information = influencer_has_information or bool(state.get("influencer_has_information", false))
+	fraud_guard7_spoken = bool(state.get("fraud_guard7_spoken", fraud_guard7_spoken))
+	fraud_letter_received = bool(state.get("fraud_letter_received", fraud_letter_received))
+	fraud_case_resolved = bool(state.get("fraud_case_resolved", fraud_case_resolved))
+	fraud_guard7_suspicion_stage = int(state.get("fraud_guard7_suspicion_stage", fraud_guard7_suspicion_stage))
+	fraud_wrong_suspicions = int(state.get("fraud_wrong_suspicions", fraud_wrong_suspicions))
+	var shared_fraud_owner := int(state.get("fraud_owner_peer_id", 0))
+	if shared_fraud_owner > 0:
+		fraud_owner_peer_id = shared_fraud_owner
+	fraud_guard6_concern_played = bool(state.get("fraud_guard6_concern_played", fraud_guard6_concern_played))
+	guardian8_mission_completed = guardian8_mission_completed or bool(state.get("guardian8_mission_completed", false))
+	var shared_guardian8_owner := int(state.get("guardian8_owner_peer_id", 0))
+	if shared_guardian8_owner > 0:
+		guardian8_owner_peer_id = shared_guardian8_owner
+	if guardian8_mission_completed:
+		whale_puzzle_active = false
+		guardian8_dialogue_pending = false
+		if is_instance_valid(player) and game_running:
+			player.controls_enabled = true
+		if is_instance_valid(whale_puzzle_panel):
+			whale_puzzle_panel.visible = false
+		if guardian8 != null and is_instance_valid(guardian8):
+			guardian8.global_position = guardian8_home_position
+	game_time_remaining = minf(game_time_remaining, float(state.get("game_time_remaining", game_time_remaining)))
 	for index in state.get("interviewed", []):
 		interviewed_npcs[index] = true
 	for index in state.get("informed", []):
@@ -3407,8 +3945,15 @@ func _exit_network_game() -> void:
 	_update_information_hud()
 
 func _update_nearest_station() -> void:
+	if whale_puzzle_active:
+		prompt.text = "Flechas · mover  |  MAYÚS / BLOQ MAYÚS · girar 90°  |  ESPACIO · tomar/dejar"
+		prompt_panel.visible = true
+		return
 	if panel != null and panel.visible:
-		prompt.text = "E  ·  Cerrar"
+		if guardian8_dialogue_pending:
+			prompt.text = "ESPACIO  ·  Abrir rompecabezas"
+		else:
+			prompt.text = "Q  ·  Cerrar" if panel_uses_q else "E  ·  Cerrar"
 		prompt_panel.visible = true
 		return
 	var target := _nearest_interaction_target()
@@ -3417,60 +3962,135 @@ func _update_nearest_station() -> void:
 		prompt_panel.visible = false
 		return
 	match String(target.kind):
+		"guardian8":
+			if guardian8_mission_completed:
+				prompt.text = "Guardia 8 está acompañado · intervención completada"
+			elif not _guardian8_role_allowed():
+				prompt.text = "Solo el Bardo o el Revolucionario pueden intervenir"
+			elif guardian8_owner_peer_id > 0 and not _is_guardian8_event_owner():
+				prompt.text = "Otro jugador está acompañando a Guardia 8"
+			else:
+				prompt.text = "Q · Hablar con Guardia 8 desde el bloque cercano"
+		"fraud_npc":
+			prompt.text = _fraud_prompt(String(target.guard_name))
 		"chest":
 			var index: int = target.index
 			if active_role != "Ciudadano":
-				prompt.text = "Solo el Héroe puede recoger fichas"
+				prompt.text = "Solo el Héroe puede recoger cartas"
+			elif info_delivered:
+				prompt.text = "Misión de cartas completada · este cofre ya no entrega cartas"
+			elif collected_info.has(index):
+				prompt.text = "Cofre revisado · carta entregada"
+			elif pending_card_chest_index >= 0:
+				prompt.text = "Recoge la carta pendiente y llévala al tablón"
 			else:
-				prompt.text = "E  ·  Abrir cofre y recoger información" if not collected_info.has(index) else "E  ·  Revisar información recogida"
+				prompt.text = "E  ·  Abrir cofre y sacar una carta"
+		"card":
+			prompt.text = "E  ·  Recoger la carta %d/10" % (mini(collected_info.size(), REQUIRED_INFO_CHESTS) + 1) if active_role == "Ciudadano" else "La carta es para el Héroe"
+		"carry":
+			if hero_is_carrying_card:
+				prompt.text = "Lleva la carta al tablón de información"
+			else:
+				prompt.text = "Ve al cofre abierto para recoger la carta"
 		"ticket":
 			if active_role == "Ciudadano":
-				prompt.text = "E  ·  Entregar información en la taquilla" if collected_info.size() >= REQUIRED_INFO_CHESTS else "Abre al menos 10 cofres antes de entregarla"
+				if info_delivered:
+					prompt.text = "Tablón completo · el Mensajero puede recoger el expediente"
+				elif hero_is_carrying_card:
+					prompt.text = "E  ·  Entregar la carta %d/10" % (mini(collected_info.size(), REQUIRED_INFO_CHESTS) + 1)
+				elif pending_card_chest_index >= 0:
+					prompt.text = "Primero recoge la carta que quedó en el cofre"
+				else:
+					prompt.text = "Abre un cofre, recoge la carta y tráela aquí"
 			elif active_role == "Periodista":
-				prompt.text = "E  ·  Verificar la información" if info_delivered and interviewed_npcs.size() == npc_targets.size() and not journalist_verified else "Mensajero: entrevista al público y espera la entrega"
+				if journalist_verified:
+					prompt.text = "Expediente entregado al Bardo"
+				elif not info_delivered:
+					prompt.text = "Mensajero: entrevista al público mientras el Héroe completa el tablón"
+				elif journalist_has_documents:
+					prompt.text = "Expediente recogido · llévalo al escritorio de investigación"
+				else:
+					prompt.text = "E  ·  Recoger expediente y llevarlo al escritorio"
 			else:
-				prompt.text = "Esta taquilla corresponde al Héroe y al Mensajero"
+				prompt.text = "El tablón lo usan el Héroe y el Mensajero"
+		"desk":
+			if active_role != "Periodista":
+				prompt.text = "Escritorio de investigación · uso del Mensajero"
+			elif journalist_verified:
+				prompt.text = "Verificación completada · expediente listo"
+			elif not info_delivered:
+				prompt.text = "Espera a que el Héroe complete las tres hojas del tablón"
+			elif not journalist_has_documents:
+				prompt.text = "Primero recoge el expediente del tablón de información"
+			elif interviewed_npcs.size() < npc_targets.size():
+				prompt.text = "Completa las entrevistas: %d/%d" % [interviewed_npcs.size(), npc_targets.size()]
+			else:
+				prompt.text = "E  ·  Resolver puzles y verificar la información"
 		"roulette": prompt.text = "Ruleta usada esta partida" if roulette_used else "E  ·  Girar ruleta (una vez por partida)"
 		"npc":
 			var state: Dictionary = npc_targets[int(target.npc_index)]
 			var mood_percent := roundi(float(state.mood) * 100.0)
-			match active_role:
-				"Periodista": prompt.text = "Entrevista lista · " + String(target.name) if interviewed_npcs.has(target.npc_index) else "E  ·  Hablar y resolver acertijo con " + String(target.name)
-				"Influencer":
-					if not influencer_has_information:
-						var cooldown := float(bard_cooldowns.get(int(target.npc_index), 0.0))
-						if cooldown > 0.0:
-							prompt.text = "Bardo · espera %d s para volver a animar" % ceili(cooldown)
-						elif bard_cheer_target == int(target.npc_index):
-							prompt.text = "Mantén E · Animando %d%% (8 s)" % roundi(bard_cheer_elapsed / BARD_CHEER_HOLD_DURATION * 100.0)
+			if fraud_letter_received and not fraud_case_resolved and _is_fraud_event_owner():
+				prompt.text = "Q  ·  Sospechar de " + String(target.name).replace("_", " ") + "  ·  fallo: −1 min"
+			else:
+				match active_role:
+					"Periodista": prompt.text = "Entrevista lista · " + String(target.name) if interviewed_npcs.has(target.npc_index) else "E  ·  Hablar y resolver acertijo con " + String(target.name)
+					"Influencer":
+						if not influencer_has_information:
+							var cooldown := float(bard_cooldowns.get(int(target.npc_index), 0.0))
+							if cooldown > 0.0:
+								prompt.text = "Bardo · espera %d s para volver a animar" % ceili(cooldown)
+							elif bard_cheer_target == int(target.npc_index):
+								prompt.text = "Mantén E · Animando %d%% (8 s)" % roundi(bard_cheer_elapsed / BARD_CHEER_HOLD_DURATION * 100.0)
+							else:
+								prompt.text = "Mantén E durante 8 s · Animar un poco a " + String(target.name)
+						elif influencer_delivery_cursor >= influencer_delivery_queue.size():
+							prompt.text = "Entrega completada · " + String(target.name)
+						elif int(target.npc_index) == _next_npc_to_inform():
+							prompt.text = "E  ·  Entregar el siguiente dato a " + String(target.name)
+						elif informed_npcs.has(target.npc_index):
+							prompt.text = "Dato entregado · espera el siguiente turno"
 						else:
-							prompt.text = "Mantén E durante 8 s · Animar un poco a " + String(target.name)
-					elif influencer_delivery_cursor >= influencer_delivery_queue.size():
-						prompt.text = "Entrega completada · " + String(target.name)
-					elif int(target.npc_index) == _next_npc_to_inform():
-						prompt.text = "E  ·  Entregar el siguiente dato a " + String(target.name)
-					elif informed_npcs.has(target.npc_index):
-						prompt.text = "Dato entregado · espera el siguiente turno"
-					else:
-						prompt.text = "Entrega primero al siguiente vecino"
-				"Candidato a alcalde": prompt.text = "Ánimo recargando · %d%%" % mood_percent if state.recharging else "E  ·  Animar a " + String(target.name) + "  ·  Ánimo %d%%" % mood_percent
-				_: prompt.text = "El Héroe no tiene una acción con este vecino"
+							prompt.text = "Entrega primero al siguiente vecino"
+					"Candidato a alcalde": prompt.text = "Ánimo recargando · %d%%" % mood_percent if state.recharging else "E  ·  Animar a " + String(target.name) + "  ·  Ánimo %d%%" % mood_percent
+					_: prompt.text = "E  ·  Conversar con " + String(target.name).replace("_", " ")
 	prompt_panel.visible = not prompt.text.is_empty()
 
-func _nearest_interaction_target() -> Dictionary:
+func _nearest_interaction_target(ignore_guardian8 := false) -> Dictionary:
 	var nearest: Dictionary = {}
 	var best := 3.5
+	if not ignore_guardian8 and not guardian8_mission_completed and is_instance_valid(guardian8) and is_instance_valid(player) and player.is_on_floor():
+		var guard_offset: Vector3 = player.global_position - guardian8.global_position
+		if Vector2(guard_offset.x, guard_offset.z).length() <= GUARDIAN8_REMOTE_INTERACTION_RANGE and absf(guard_offset.y) <= GUARDIAN8_REMOTE_HEIGHT_RANGE:
+			return {"kind":"guardian8", "node":guardian8}
+	if fraud_letter_received and not fraud_case_resolved and _is_fraud_event_owner():
+		return _nearest_fraud_suspicion_target()
+	if active_role == "Ciudadano" and hero_is_carrying_card:
+		if ticket_terminal_position.x > -1000 and player.global_position.distance_to(ticket_terminal_position) <= 3.5:
+			return {"kind":"ticket"}
+		return {"kind":"carry"}
+	if active_role == "Ciudadano" and pending_card_chest_index >= 0:
+		if chest_letter != null and chest_letter.visible and player.global_position.distance_to(chest_letter.global_position) <= 3.5:
+			return {"kind":"card"}
+		return {"kind":"carry"}
 	for i in range(info_chests.size()):
+		if collected_info.has(i):
+			continue
 		var chest_pos: Vector3 = info_chests[i].position
 		var distance := player.global_position.distance_to(chest_pos)
 		if distance < best:
 			best = distance
 			nearest = {"kind":"chest", "index":i}
-	if ticket_machine_position.x > -1000:
-		var machine_distance := player.global_position.distance_to(ticket_machine_position)
-		if machine_distance < best:
-			best = machine_distance
+	if ticket_terminal_position.x > -1000:
+		var terminal_distance := player.global_position.distance_to(ticket_terminal_position)
+		if terminal_distance < best:
+			best = terminal_distance
 			nearest = {"kind":"ticket"}
+	if research_desk_position.x > -1000:
+		var desk_distance := player.global_position.distance_to(research_desk_position)
+		if desk_distance < best:
+			best = desk_distance
+			nearest = {"kind":"desk"}
 	if roulette_position.x > -1000:
 		var roulette_distance := player.global_position.distance_to(roulette_position)
 		if roulette_distance < roulette_interaction_range and (nearest.is_empty() or roulette_distance < best):
@@ -3483,75 +4103,229 @@ func _nearest_interaction_target() -> Dictionary:
 		if distance < best:
 			best = distance
 			nearest = {"kind":"npc", "name":npc.name, "node":npc.node, "npc_index":i}
+	for guard_name in fraud_guard_nodes:
+		if fraud_owner_peer_id > 0 and not _is_fraud_event_owner():
+			continue
+		var guard := fraud_guard_nodes[guard_name] as Node3D
+		if guard == null or not is_instance_valid(guard):
+			continue
+		var distance := player.global_position.distance_to(guard.global_position)
+		if distance < best:
+			best = distance
+			nearest = {"kind":"fraud_npc", "guard_name":String(guard_name), "name":String(guard_name), "node":guard}
 	return nearest
 
-func _open_nearest_station() -> void:
-	var target := _nearest_interaction_target()
+func _nearest_fraud_suspicion_target() -> Dictionary:
+	var nearest: Dictionary = {}
+	var best := 3.5
+	for i in range(npc_targets.size()):
+		var state: Dictionary = npc_targets[i]
+		var npc := state.node as Node3D
+		if npc == null or not is_instance_valid(npc):
+			continue
+		var distance := player.global_position.distance_to(npc.global_position)
+		if distance < best:
+			best = distance
+			nearest = {"kind":"npc", "name":state.name, "node":npc, "npc_index":i}
+	for guard_name in fraud_guard_nodes:
+		var guard := fraud_guard_nodes[guard_name] as Node3D
+		if guard == null or not is_instance_valid(guard):
+			continue
+		var distance := player.global_position.distance_to(guard.global_position)
+		if distance < best:
+			best = distance
+			nearest = {"kind":"fraud_npc", "guard_name":String(guard_name), "name":String(guard_name), "node":guard}
+	return nearest
+
+func _fraud_prompt(guard_name: String) -> String:
+	if fraud_case_resolved:
+		return "Caso de las cartas resuelto"
+	if fraud_owner_peer_id > 0 and not _is_fraud_event_owner():
+		return "Este mini evento ya tiene responsable · sigue tu misión de rol"
+	if guard_name == "Guardia_07":
+		if fraud_letter_received:
+			return "Q  ·  Sospechar de Guardia 7  ·  fallo: −1 min"
+		return "Q  ·  Hablar con Guardia 7" if not fraud_guard7_spoken else "Q  ·  Volver a hablar con Guardia 7"
+	if not fraud_guard7_spoken:
+		return "Habla primero con Guardia 7"
+	if fraud_letter_received:
+		return "Q  ·  Sospechar de Guardia 6  ·  fallo: −1 min"
+	return "Q  ·  Hablar con Guardia 6 y leer la carta"
+
+func _is_fraud_event_owner() -> bool:
+	return fraud_owner_peer_id > 0 and fraud_owner_peer_id == multiplayer.get_unique_id()
+
+func _append_npc_greeting(npc_index: int) -> void:
+	if npc_greeted.has(npc_index):
+		return
+	npc_greeted[npc_index] = true
+	var greetings := [
+		"¡Buenos días! La plaza está tranquila por ahora.",
+		"¡Hola, viajero! ¿Has visto cómo está el mercado hoy?",
+		"Saludos. Ojalá las noticias de hoy sean ciertas.",
+		"¡Qué bueno verte! Estoy atento a lo que ocurre en el reino.",
+		"Hola. Si encuentras información fiable, compártela con cuidado."
+	]
+	if panel_text != null:
+		panel_text.text += "\n\n" + String(greetings[npc_index % greetings.size()])
+
+func _handle_fraud_guard_interaction(guard_name: String) -> void:
+	if fraud_case_resolved:
+		panel_text.text = "CASO RESUELTO\n\nGuardia 7 confesó la estafa, se disculpó y devolvió el dinero a Guardia 6."
+	elif fraud_owner_peer_id > 0 and not _is_fraud_event_owner():
+		panel_text.text = "MINI EVENTO EN CURSO\n\nOtro jugador ya se encargó de investigar estas cartas. Continúa con la misión de tu rol: cofres, información y ánimo de los vecinos."
+	elif fraud_letter_received:
+		_attempt_fraud_suspicion(guard_name)
+	elif guard_name == "Guardia_07":
+		if fraud_owner_peer_id == 0:
+			fraud_owner_peer_id = multiplayer.get_unique_id()
+		fraud_guard7_spoken = true
+		panel_text.text = "GUARDIA 7 · ESCRIBIENDO\n\n«¡Holaa, viajeroo! Estoy escribiendooo unas cartasss… nada importante, je, je. Las letras se me mueven un poquillooo. Mejor pregunta a otro guardiaaa.»\n\nSu habla arrastrada y las letras repetidas te dejan una duda. Guardia 6 podría saber algo."
+		_broadcast_coop_state()
+	else:
+		if not fraud_guard7_spoken:
+			panel_text.text = "GUARDIA 6\n\n«Primero habla con Guardia 7. Él está escribiendo muchas cartas y quizá sepa algo.»"
+		else:
+			fraud_letter_received = true
+			panel_text.text = "GUARDIA 6 · CARTA RECIBIDA\n\n«Alguien me manda cartas pidiendo dinero urgente. Abrí una y quiero que me ayudes a averiguar quién las escribió.»\n\nCARTA:\n“Amigooo, necesito 30 monedas urgentesss. Envíamelas yaaa, no preguntesss y no se lo digasss a nadieee. Estoy un poquillooo confundido, pero te las devolveré prontooo.”\n\nPuedes leerla y sospechar de cualquier NPC con Q. Si acusas a la persona equivocada, perderás 1 minuto."
+			if not fraud_guard6_concern_played:
+				fraud_guard6_concern_played = true
+				var guard6 := fraud_guard_nodes.get("Guardia_06") as Node3D
+				_play_guard_concern_animation(guard6)
+			_broadcast_coop_state()
+	panel.visible = true
+	_update_information_hud()
+
+func _attempt_fraud_suspicion(suspect_name: String) -> void:
+	var normalized := suspect_name.replace(" ", "_")
+	if normalized == "Guardia_07":
+		fraud_guard7_suspicion_stage += 1
+		if fraud_guard7_suspicion_stage == 1:
+			panel_text.text = "GUARDIA 7 · SE PONE NERVIOSO\n\n«¿Yo? Nooo… esas letras no son mías. No sé nada de las 30 monedasss… digo, de ninguna carta.»\n\nSu respuesta confirma que debes insistir. Pulsa Q otra vez para confrontarlo."
+		else:
+			fraud_case_resolved = true
+			fraud_letter_received = false
+			panel_text.text = "ESTAFA DESCUBIERTA\n\nGuardia 7 baja la voz: «Está bien, yo escribí las cartas. Fingí estar borracho para que no me reconocieran. Perdóname; voy a devolverle las 30 monedas a Guardia 6.»\n\nGuardia 6 recuperó su dinero. Caso resuelto."
+		_update_information_hud()
+		_broadcast_coop_state()
+		return
+	fraud_wrong_suspicions += 1
+	game_time_remaining = maxf(0.0, game_time_remaining - 60.0)
+	_update_timer_hud()
+	var innocent_line := "«No escribí esa carta. Revisa las pistas y vuelve a intentarlo.»"
+	for state in npc_targets:
+		if String(state.name) == normalized:
+			innocent_line = "«No sé nada de esa estafa. Yo no escribí la carta.»"
+			break
+	panel_text.text = "SOSPECHA EQUIVOCADA\n\n%s\n\nPerdiste 1 minuto. Tiempo restante: %02d:%02d. Sigue comparando la carta con los NPCs." % [innocent_line, ceili(game_time_remaining) / 60, ceili(game_time_remaining) % 60]
+	if game_time_remaining <= 0.0 and not game_timer_timeout:
+		game_timer_timeout = true
+		_end_game(false)
+	_broadcast_coop_state()
+
+func _open_nearest_station(ignore_guardian8 := false) -> void:
+	var target := _nearest_interaction_target(ignore_guardian8)
 	if target.is_empty():
 		return
+	panel_uses_q = String(target.get("kind", "")) == "fraud_npc" or (fraud_letter_received and String(target.get("kind", "")) == "npc")
 	match String(target.kind):
 		"chest":
 			var index: int = target.index
 			if active_role != "Ciudadano":
-				panel_text.text = "Solo el Héroe puede recoger las fichas de información."
+				panel_text.text = "Solo el Héroe puede abrir cofres para recoger cartas."
+			elif info_delivered or collected_info.size() >= REQUIRED_INFO_CHESTS:
+				panel_text.text = "La misión del Héroe está completa. Los cofres ya no entregan cartas."
+			elif hero_is_carrying_card or pending_card_chest_index >= 0:
+				panel_text.text = "Primero recoge la carta del cofre abierto y entrégala en el tablón. Solo puedes llevar una carta a la vez."
 			elif collected_info.has(index):
-				panel_text.text = "✦   INFORMACIÓN RECOGIDA\n\n" + String(collected_info[index]) + "\n\nLleva todas las fichas a la máquina de tickets. Pulsa E para cerrar."
+				panel_text.text = "Este cofre ya fue revisado. La carta ya está en el tablón."
 			else:
 				var clues := ["Alerta: un rumor sobre el centro comunitario no incluye un enlace oficial verificable.", "El calendario municipal anuncia una jornada de limpieza vecinal.", "Una encuesta a tres personas no representa a todo el reino.", "El portal electoral confirma fecha y hora del debate municipal.", "Una captura recortada no demuestra que el parque vaya a cerrar.", "Revisa si la propuesta de reparación presenta responsables y presupuesto.", "Compara la cifra del mensaje con el informe público original.", "El mensaje sobre fondos proviene de una cuenta anónima sin pruebas.", "Comprueba la fecha original de la noticia antes de compartirla.", "Consulta el acta electoral para confirmar el sitio y hora de votación."]
-				var clue := String(clues[index % clues.size()])
-				collected_info[index] = clue
+				pending_card_chest_index = index
+				pending_card_clue = String(clues[index % clues.size()])
 				_save_opened_chest(index)
 				var chest := info_chests[index].node as Node3D
 				_stop_chest_proximity_sound(chest)
 				_open_chest_visual(chest)
 				_play_chest_open_sound(chest)
-				answered = collected_info.size()
-				var progress := "\n\nFichas recogidas: %d / %d necesarias." % [mini(collected_info.size(), REQUIRED_INFO_CHESTS), REQUIRED_INFO_CHESTS]
-				if collected_info.size() >= REQUIRED_INFO_CHESTS:
-					progress += "\nYa tienes las fichas necesarias. Llévalas a la máquina de tickets."
-				panel_text.text = "✦   FICHA DE INFORMACIÓN %d\n\n%s%s\n\nPulsa E para cerrar." % [index + 1, clue, progress]
+				_place_chest_letter_at(index)
+				panel_text.text = "✦   CARTA EN EL COFRE\n\nAbre el cofre y su carta apareció encima. Recógela con E y llévala al tablón antes de abrir otro. Cartas entregadas: %d / %d." % [mini(collected_info.size(), REQUIRED_INFO_CHESTS), REQUIRED_INFO_CHESTS]
+				card_carrier_peer_id = 0
 				_broadcast_coop_state()
 			_update_information_hud()
+		"card":
+			if active_role == "Ciudadano":
+				_pick_up_chest_letter()
+			else:
+				panel_text.text = "Solo el Héroe puede recoger esta carta."
+			_update_information_hud()
+		"carry":
+			panel_text.text = "Lleva la carta que está en el cofre abierto al tablón de información. No puedes abrir otro cofre todavía."
+			_update_information_hud()
 		"ticket":
-			if active_role == "Ciudadano" and collected_info.size() < REQUIRED_INFO_CHESTS:
-				panel_text.text = "✦   MÁQUINA DE TICKETS\n\nTodavía faltan fichas por recoger.\nFichas: %d / %d\n\nAbre al menos 10 cofres y vuelve para entregar la información." % [collected_info.size(), REQUIRED_INFO_CHESTS]
-			elif active_role == "Ciudadano":
-				info_delivered = true
-				panel_text.text = "✓   INFORMACIÓN ENTREGADA\n\nLa máquina registró tus fichas. Ya puedes revisar las fuentes, fechas y datos reunidos.\n\nProgreso requerido: %d / %d fichas." % [mini(collected_info.size(), REQUIRED_INFO_CHESTS), REQUIRED_INFO_CHESTS]
-				_update_information_hud()
-				_broadcast_coop_state()
-				_broadcast_coop_state()
+			if active_role == "Ciudadano":
+				if hero_is_carrying_card:
+					_deliver_chest_letter_to_board()
+				elif info_delivered:
+					panel_text.text = "✓   TABLÓN COMPLETO\n\nLas 10 cartas ya están colocadas. El Mensajero puede recoger el expediente y llevarlo al escritorio de investigación."
+				else:
+					panel_text.text = "✦   ENTREGA UNA CARTA A LA VEZ\n\nAbre un cofre, recoge la carta con E y vuelve aquí para colocarla. No puedes llevar varias cartas a la vez. Progreso: %d / %d." % [mini(collected_info.size(), REQUIRED_INFO_CHESTS), REQUIRED_INFO_CHESTS]
 			elif active_role == "Periodista":
+				if journalist_verified:
+					panel_text.text = "✓   EXPEDIENTE VERIFICADO\n\nLa información ya se analizó en el escritorio y está lista para el Bardo."
+				elif not info_delivered:
+					panel_text.text = "✦   EL TABLÓN AÚN NO ESTÁ COMPLETO\n\nEl Héroe debe colocar las tres hojas antes de que puedas recoger el expediente."
+				elif journalist_has_documents:
+					panel_text.text = "EXPEDIENTE RECOGIDO\n\nLleva obligatoriamente la información al escritorio de investigación. Allí podrás resolver los puzles y clasificar cada dato."
+					_update_information_hud()
+				else:
+					journalist_has_documents = true
+					panel_text.text = "✦   EXPEDIENTE RECOGIDO\n\nHas tomado la información del tablón. Llévala al escritorio de investigación para resolver los puzles y decidir qué datos son verdaderos o falsos."
+					_broadcast_coop_state()
+			else:
+				panel_text.text = "El Héroe entrega aquí las cartas y el Mensajero verifica la información."
+			_update_information_hud()
+		"desk":
+			if active_role == "Periodista":
 				_start_journalist_verification()
 			else:
-				panel_text.text = "La taquilla la usan el Héroe para entregar fichas y el Mensajero para verificarlas."
+				panel_text.text = "ESCRITORIO DE INVESTIGACIÓN\n\nEste puesto secundario es para el Mensajero. Aquí se descifra y verifica el expediente recogido del tablón."
 			_update_information_hud()
 		"roulette":
 			_use_roulette()
 		"npc":
 			var npc_index: int = target.npc_index
 			var npc_node := target.node as Node3D
-			match active_role:
-				"Periodista":
-					_interview_public(npc_index)
-				"Influencer":
-					_share_info_to_npc(npc_index)
-				"Candidato a alcalde":
-					if npc_targets[npc_index].recharging:
-						panel_text.text = "✦   " + String(target.name).replace("_", " ") + "\n\nSu ánimo se está recargando. Espera a que termine para volver a animarlo."
-					else:
-						_cheer_npc(npc_index)
-						panel_text.text = "✦   " + String(target.name).replace("_", " ") + "\n\n¡Lo animaste! Su barra volverá a llenarse y bajará en %d segundos." % int(npc_mood_duration)
-				_:
-					panel_text.text = "El Héroe se encarga de reunir y entregar la información."
+			if fraud_letter_received and not fraud_case_resolved:
+				_attempt_fraud_suspicion(String(target.name))
+			else:
+				match active_role:
+					"Periodista":
+						_interview_public(npc_index)
+					"Influencer":
+						_share_info_to_npc(npc_index)
+					"Candidato a alcalde":
+						if npc_targets[npc_index].recharging:
+							panel_text.text = "✦   " + String(target.name).replace("_", " ") + "\n\nSu ánimo se está recargando. Espera a que termine para volver a animarlo."
+						else:
+							_cheer_npc(npc_index)
+							panel_text.text = "✦   " + String(target.name).replace("_", " ") + "\n\n¡Lo animaste! Su barra volverá a llenarse y bajará en %d segundos." % int(npc_mood_duration)
+					_:
+						panel_text.text = "✦   " + String(target.name).replace("_", " ") + "\n\nEl vecino te saluda y comparte cómo van las cosas en el reino."
+				_append_npc_greeting(npc_index)
 			panel_text.text += "\n\nPulsa E para cerrar."
 			_update_information_hud()
-	panel.visible = true
+		"fraud_npc":
+			_handle_fraud_guard_interaction(String(target.guard_name))
+			panel_text.text += "\n\nPulsa Q para cerrar."
+	panel.visible = not ["chest", "card", "carry"].has(String(target.kind))
 
 func _update_information_hud() -> void:
 	if hud == null:
 		return
-	var status := "INFORMACIÓN   %d / %d     ·     VECINOS   %d / %d" % [mini(collected_info.size(), REQUIRED_INFO_CHESTS), REQUIRED_INFO_CHESTS, informed_npcs.size(), npc_targets.size()]
+	var status := "CARTAS   %d / %d     ·     VECINOS   %d / %d" % [mini(collected_info.size(), REQUIRED_INFO_CHESTS), REQUIRED_INFO_CHESTS, informed_npcs.size(), npc_targets.size()]
+	var fraud_status := "resuelta" if fraud_case_resolved else ("a cargo de otro jugador" if fraud_owner_peer_id > 0 and not _is_fraud_event_owner() else ("carta en mano · sospechas: %d" % fraud_wrong_suspicions if fraud_letter_received else ("habla con Guardia 7" if not fraud_guard7_spoken else "habla con Guardia 6")))
+	status += "\nESTAFA · " + fraud_status
 	if is_solo_mode:
 		status += "\nMISIÓN · %s\n%s" % [_role_display_name(active_role).to_upper(), _role_mission(active_role)]
 	else:
@@ -3595,9 +4369,9 @@ func _answer_interview_puzzle(signal_number: int) -> void:
 	journalist_puzzle_npc = -1
 	interviewed_npcs[npc_index] = true
 	var npc_name: String = String(npc_targets[npc_index].name).replace("_", " ")
-	panel_text.text = "ENTREVISTA COMPLETADA · %s\n\nResolviste la clave y registraste su testimonio. Entrevistas: %d / %d.\n\nPuedes continuar con otro vecino mientras el Héroe recoge las fichas." % [npc_name, interviewed_npcs.size(), npc_targets.size()]
+	panel_text.text = "ENTREVISTA COMPLETADA · %s\n\nResolviste la clave y registraste su testimonio. Entrevistas: %d / %d.\n\nPuedes continuar con otro vecino mientras el Héroe entrega las cartas." % [npc_name, interviewed_npcs.size(), npc_targets.size()]
 	if interviewed_npcs.size() == npc_targets.size():
-		panel_text.text += "\n\nCuando el Héroe entregue todos los cofres, ve a la taquilla para verificar la información."
+		panel_text.text += "\n\nCuando el Héroe complete las tres hojas, recoge allí el expediente y llévalo al escritorio de investigación para verificarlo."
 	_update_information_hud()
 	_broadcast_coop_state()
 
@@ -3606,7 +4380,10 @@ func _start_journalist_verification() -> void:
 		panel_text.text = "La información ya fue verificada y está lista para el Bardo."
 		return
 	if not info_delivered:
-		panel_text.text = "El Héroe todavía no ha entregado las fichas."
+		panel_text.text = "El Héroe todavía no ha entregado las cartas al tablón."
+		return
+	if not journalist_has_documents:
+		panel_text.text = "Primero recoge el expediente del tablón y llévalo al escritorio de investigación."
 		return
 	if interviewed_npcs.size() < npc_targets.size():
 		panel_text.text = "Antes de revisar la información, entrevista a todos los vecinos. Entrevistas: %d / %d." % [interviewed_npcs.size(), npc_targets.size()]
@@ -3803,11 +4580,15 @@ func _play_chest_open_sound(chest: Node3D) -> void:
 	sound.play()
 
 func _load_chest_open_sound() -> void:
-	chest_near_stream = load(CHEST_NEAR_SOUND_PATH) as AudioStreamMP3
+	chest_near_stream = load(CHEST_NEAR_SOUND_PATH) as AudioStreamWAV
 	if chest_near_stream == null:
-		push_warning("No pude cargar la música de proximidad de los cofres.")
+		push_warning("No pude cargar el bucle de proximidad de los cofres.")
 	else:
-		chest_near_stream.loop = true
+		var channels := 2 if chest_near_stream.stereo else 1
+		var frame_count := int(chest_near_stream.data.size() / (channels * 2))
+		chest_near_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		chest_near_stream.loop_begin = mini(roundi(chest_near_stream.mix_rate * CHEST_NEAR_LOOP_START_SECONDS), frame_count - 1)
+		chest_near_stream.loop_end = frame_count
 	var file := FileAccess.open(CHEST_OPEN_SOUND_PATH, FileAccess.READ)
 	if file == null or file.get_length() <= 44:
 		push_warning("No pude cargar el sonido de apertura del cofre.")
@@ -3861,12 +4642,20 @@ func _use_roulette() -> void:
 			panel_text.text = "La ruleta aceleró el desgaste del ánimo. Las barras de los guardias ahora duran 40 segundos.\n\nPulsa E para cerrar."
 		1:
 			collected_info.clear()
+			hero_is_carrying_card = false
+			pending_card_chest_index = -1
+			pending_card_clue = ""
+			card_carrier_peer_id = 0
+			_return_chest_letter_to_spawn()
 			info_delivered = false
+			_set_board_pages_placed(0)
 			for chest_info in info_chests:
-				_close_chest_visual(chest_info.node as Node3D)
+				var chest := chest_info.node as Node3D
+				_close_chest_visual(chest)
+				chest.set_meta("chest_sound_opened", false)
 			_update_information_hud()
 			_broadcast_coop_state()
-			panel_text.text = "La ruleta reinició los cofres. Tendrás que abrirlos otra vez y llevar la información a la máquina de tickets.\n\nPulsa E para cerrar."
+			panel_text.text = "La ruleta reinició los cofres. Tendrás que recoger las cartas y llevarlas una por una al tablón.\n\nPulsa E para cerrar."
 		2:
 			speed_boost_time = 60.0
 			if is_instance_valid(player):
@@ -3896,6 +4685,10 @@ func _answer(choice: int) -> void:
 	question_index = -1
 
 func _close_question() -> void:
+	if guardian8_dialogue_pending:
+		guardian8_dialogue_pending = false
+		_begin_whale_puzzle()
+		return
 	if journalist_claim_index >= 0 and journalist_puzzle_stage == "result":
 		journalist_puzzle_stage = "minigame"
 		if journalist_claim_index < journalist_claims.size():
@@ -3903,7 +4696,264 @@ func _close_question() -> void:
 		_show_journalist_claim()
 		return
 	panel.visible = false
+	panel_uses_q = false
 	question_index = -1
+
+func _guardian8_role_allowed() -> bool:
+	return active_role in ["Influencer", "Candidato a alcalde"]
+
+func _is_guardian8_event_owner() -> bool:
+	return guardian8_owner_peer_id > 0 and guardian8_owner_peer_id == _local_peer_id()
+
+func _local_peer_id() -> int:
+	# Solo mode has no MultiplayerPeer assigned; Godot uses peer ID 1 for the local player.
+	if multiplayer.multiplayer_peer == null:
+		return 1
+	return multiplayer.get_unique_id()
+
+func _start_guardian8_interaction() -> void:
+	panel_uses_q = true
+	if guardian8_mission_completed:
+		panel_text.text = "GUARDIA 8 · ACOMPAÑAMIENTO COMPLETADO\n\nGuardia 8 decidió quedarse con sus compañeros y pedir apoyo. Gracias por escucharlo y acompañarlo."
+		panel.visible = true
+		return
+	if not _guardian8_role_allowed():
+		panel_text.text = "GUARDIA 8 NECESITA APOYO\n\nEsta intervención la pueden realizar el Bardo o el Revolucionario. Cambia de rol con TAB para ayudar."
+		panel.visible = true
+		return
+	if guardian8_owner_peer_id > 0 and not _is_guardian8_event_owner():
+		panel_text.text = "OTRO JUGADOR YA ESTÁ ACOMPAÑANDO A GUARDIA 8\n\nContinúa con las demás tareas del equipo."
+		panel.visible = true
+		return
+	if guardian8_owner_peer_id == 0:
+		guardian8_owner_peer_id = _local_peer_id()
+		_broadcast_coop_state()
+	guardian8_dialogue_pending = true
+	panel_uses_q = false
+	if is_instance_valid(player):
+		player.controls_enabled = false
+	panel_text.text = "GUARDIA 8\n\n—Esta ballena aparece en los mensajes que me llegaron. Ahora entiendo que el reto es peligroso y no quiero seguirlo.\n\n—No tienes que hacerlo. Me quedo contigo y buscamos apoyo de alguien de confianza. Podemos reconstruir juntos la imagen y dejar ese reto atrás.\n\nPulsa ESPACIO para abrir el rompecabezas."
+	panel.visible = true
+	if is_instance_valid(whale_puzzle_panel):
+		whale_puzzle_panel.visible = false
+	_update_information_hud()
+
+func _build_whale_puzzle_ui(layer: CanvasLayer) -> void:
+	whale_puzzle_panel = PanelContainer.new()
+	whale_puzzle_panel.name = "Guardian8SupportPuzzle"
+	whale_puzzle_panel.set_anchors_preset(Control.PRESET_CENTER)
+	whale_puzzle_panel.position = Vector2(-370, -310)
+	whale_puzzle_panel.custom_minimum_size = Vector2(740, 620)
+	whale_puzzle_panel.visible = false
+	whale_puzzle_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_style_wood_panel(whale_puzzle_panel, Color("432a1d"), Vector2(740, 620))
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 12)
+	whale_puzzle_title = Label.new()
+	whale_puzzle_title.text = "GUARDIA 08 · ACOMPAÑAMIENTO"
+	whale_puzzle_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_cartoon_text(whale_puzzle_title, 28)
+	whale_puzzle_title.add_theme_color_override("font_color", Color("fff0bd"))
+	content.add_child(whale_puzzle_title)
+	whale_puzzle_instructions = Label.new()
+	whale_puzzle_instructions.text = "Flechas: mueve la selección · MAYÚS o BLOQ MAYÚS: gira la pieza 90° · ESPACIO: toma o coloca"
+	whale_puzzle_instructions.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	whale_puzzle_instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_style_cartoon_text(whale_puzzle_instructions, 18)
+	whale_puzzle_instructions.add_theme_color_override("font_color", Color("f8dfab"))
+	content.add_child(whale_puzzle_instructions)
+	whale_puzzle_grid = GridContainer.new()
+	whale_puzzle_grid.name = "WhalePuzzleGrid"
+	whale_puzzle_grid.columns = 3
+	whale_puzzle_grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	whale_puzzle_grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	whale_puzzle_grid.add_theme_constant_override("h_separation", 8)
+	whale_puzzle_grid.add_theme_constant_override("v_separation", 8)
+	content.add_child(whale_puzzle_grid)
+	whale_puzzle_cells.clear()
+	for index in range(9):
+		var cell := Button.new()
+		cell.custom_minimum_size = Vector2(195, 137)
+		cell.focus_mode = Control.FOCUS_NONE
+		cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var tile_style := StyleBoxFlat.new()
+		tile_style.bg_color = Color("2b1a12")
+		tile_style.border_color = Color("e9b84d")
+		tile_style.set_border_width_all(3)
+		tile_style.set_corner_radius_all(8)
+		cell.add_theme_stylebox_override("normal", tile_style)
+		cell.add_theme_stylebox_override("hover", tile_style)
+		cell.add_theme_stylebox_override("pressed", tile_style)
+		var piece := TextureRect.new()
+		piece.name = "Piece"
+		piece.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+		piece.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		piece.stretch_mode = TextureRect.STRETCH_SCALE
+		piece.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cell.add_child(piece)
+		whale_puzzle_grid.add_child(cell)
+		whale_puzzle_cells.append(cell)
+	var footer := Label.new()
+	footer.text = "Arma la imagen para acompañar a Guardia 8."
+	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_cartoon_text(footer, 17)
+	footer.add_theme_color_override("font_color", Color("f8dfab"))
+	content.add_child(footer)
+	whale_puzzle_panel.add_child(content)
+	layer.add_child(whale_puzzle_panel)
+
+func _begin_whale_puzzle() -> void:
+	if not guardian8_dialogue_pending and not _is_guardian8_event_owner():
+		return
+	guardian8_dialogue_pending = false
+	whale_puzzle_active = true
+	whale_puzzle_tiles.clear()
+	whale_puzzle_rotations.clear()
+	for tile_id in range(9):
+		# Keep each crop intact: randomize only its cell and quarter-turn rotation.
+		whale_puzzle_tiles.append(tile_id)
+		whale_puzzle_rotations.append(0)
+	for index in range(whale_puzzle_tiles.size()):
+		var swap_index := randi_range(index, whale_puzzle_tiles.size() - 1)
+		var tile_id := whale_puzzle_tiles[index]
+		whale_puzzle_tiles[index] = whale_puzzle_tiles[swap_index]
+		whale_puzzle_tiles[swap_index] = tile_id
+		var rotation_code := randi_range(0, 3)
+		whale_puzzle_rotations[index] = rotation_code
+	whale_puzzle_selected_cell = 0
+	whale_puzzle_held_tile = -1
+	whale_puzzle_held_rotation = 0
+	whale_puzzle_held_origin = -1
+	if _is_whale_puzzle_solved():
+		var first_tile := whale_puzzle_tiles[0]
+		whale_puzzle_tiles[0] = whale_puzzle_tiles[1]
+		whale_puzzle_tiles[1] = first_tile
+	panel.visible = false
+	whale_puzzle_panel.visible = true
+	if is_instance_valid(player):
+		player.controls_enabled = false
+	_refresh_whale_puzzle_ui()
+
+func _move_whale_puzzle_cursor(dx: int, dy: int) -> void:
+	var col := whale_puzzle_selected_cell % 3
+	var row := int(whale_puzzle_selected_cell / 3)
+	col = clampi(col + dx, 0, 2)
+	row = clampi(row + dy, 0, 2)
+	whale_puzzle_selected_cell = row * 3 + col
+	_refresh_whale_puzzle_ui()
+
+func _rotate_whale_puzzle_tile(cell_index: int, direction: int) -> void:
+	if cell_index < 0 or cell_index >= whale_puzzle_tiles.size():
+		return
+	if whale_puzzle_held_tile >= 0 and cell_index == whale_puzzle_selected_cell:
+		whale_puzzle_held_rotation = posmod(whale_puzzle_held_rotation + direction, 4)
+	else:
+		if whale_puzzle_tiles[cell_index] < 0:
+			return
+		whale_puzzle_rotations[cell_index] = posmod(whale_puzzle_rotations[cell_index] + direction, 4)
+	_refresh_whale_puzzle_ui()
+
+func _toggle_whale_puzzle_pickup() -> void:
+	if not whale_puzzle_active:
+		return
+	var cell_index := whale_puzzle_selected_cell
+	if whale_puzzle_held_tile < 0:
+		if whale_puzzle_tiles[cell_index] < 0:
+			return
+		whale_puzzle_held_tile = whale_puzzle_tiles[cell_index]
+		whale_puzzle_held_rotation = whale_puzzle_rotations[cell_index]
+		whale_puzzle_held_origin = cell_index
+	else:
+		if cell_index != whale_puzzle_held_origin:
+			var displaced_tile := whale_puzzle_tiles[cell_index]
+			var displaced_rotation := whale_puzzle_rotations[cell_index]
+			whale_puzzle_tiles[whale_puzzle_held_origin] = displaced_tile
+			whale_puzzle_rotations[whale_puzzle_held_origin] = displaced_rotation
+			whale_puzzle_tiles[cell_index] = whale_puzzle_held_tile
+			whale_puzzle_rotations[cell_index] = whale_puzzle_held_rotation
+		whale_puzzle_held_tile = -1
+		whale_puzzle_held_rotation = 0
+		whale_puzzle_held_origin = -1
+	_refresh_whale_puzzle_ui()
+	if _is_whale_puzzle_solved():
+		_complete_guardian8_mission()
+
+func _refresh_whale_puzzle_ui() -> void:
+	if not is_instance_valid(whale_puzzle_grid):
+		return
+	for index in range(mini(whale_puzzle_cells.size(), whale_puzzle_tiles.size())):
+		var tile_id := whale_puzzle_tiles[index]
+		var rotation_code := whale_puzzle_rotations[index]
+		if whale_puzzle_held_tile >= 0:
+			if index == whale_puzzle_selected_cell:
+				tile_id = whale_puzzle_held_tile
+				rotation_code = whale_puzzle_held_rotation
+			elif index == whale_puzzle_held_origin:
+				tile_id = -1
+				rotation_code = 0
+		var cell := whale_puzzle_cells[index]
+		var piece := cell.get_node("Piece") as TextureRect
+		piece.texture = null
+		# Never mirror a crop; only rotation_degrees changes its orientation.
+		piece.flip_h = false
+		piece.flip_v = false
+		var cell_size := cell.custom_minimum_size
+		var inner_size := cell_size - Vector2(12, 12)
+		var quarter_turn := rotation_code % 2 == 1
+		piece.size = Vector2(inner_size.y, inner_size.x) if quarter_turn else inner_size
+		piece.position = (cell_size - piece.size) * 0.5
+		piece.pivot_offset = piece.size * 0.5
+		piece.rotation_degrees = 0.0
+		if tile_id >= 0:
+			var atlas := AtlasTexture.new()
+			atlas.atlas = WHALE_PUZZLE_TEXTURE
+			atlas.filter_clip = true
+			var image_size := WHALE_PUZZLE_TEXTURE.get_size()
+			var tile_size := Vector2(float(image_size.x), float(image_size.y)) / 3.0
+			atlas.region = Rect2(Vector2(tile_id % 3, int(tile_id / 3)) * tile_size, tile_size)
+			piece.texture = atlas
+			piece.rotation_degrees = float(rotation_code) * 90.0
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color("2b1a12")
+		style.border_color = Color("fff0a8") if index == whale_puzzle_selected_cell else Color("e9b84d")
+		style.set_border_width_all(5 if index == whale_puzzle_selected_cell else 3)
+		style.set_corner_radius_all(8)
+		cell.add_theme_stylebox_override("normal", style)
+		cell.add_theme_stylebox_override("hover", style)
+		cell.add_theme_stylebox_override("pressed", style)
+
+func _is_whale_puzzle_solved() -> bool:
+	if whale_puzzle_held_tile >= 0 or whale_puzzle_tiles.size() != 9:
+		return false
+	for index in range(9):
+		if whale_puzzle_tiles[index] != index or whale_puzzle_rotations[index] != 0:
+			return false
+	return true
+
+func _complete_guardian8_mission() -> void:
+	if guardian8_mission_completed:
+		return
+	whale_puzzle_active = false
+	guardian8_mission_completed = true
+	whale_puzzle_panel.visible = false
+	if is_instance_valid(player) and game_running:
+		player.controls_enabled = true
+	if guardian8 != null and is_instance_valid(guardian8):
+		guardian8.global_position = guardian8_home_position
+		for candidate in guardian8.find_children("*", "AnimationPlayer", true, false):
+			var animator := candidate as AnimationPlayer
+			if animator != null:
+				for animation_name in animator.get_animation_list():
+					if String(animation_name).to_lower().contains("idle"):
+						animator.play(String(animation_name))
+						break
+				if animator.current_animation.to_lower().contains("jump"):
+					animator.stop()
+	panel_text.text = "GUARDIA 8 · ACOMPAÑAMIENTO COMPLETADO\n\nLa imagen quedó armada. Guardia 8 decide quedarse con sus compañeros y buscar apoyo de alguien de confianza. Gracias por escucharlo y acompañarlo."
+	panel.visible = true
+	_update_information_hud()
+	_broadcast_coop_state()
+	_check_game_completion()
 
 func _add_model(path: String, at: Vector3, model_scale: Vector3, parent: Node, collidable := false, rotation_y := 0.0) -> Node3D:
 	if not ResourceLoader.exists(path):
