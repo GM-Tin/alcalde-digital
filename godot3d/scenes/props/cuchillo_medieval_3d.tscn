@@ -1,0 +1,97 @@
+[gd_scene load_steps=9 format=3]
+
+[sub_resource type="StandardMaterial3D" id="Mat_blade"]
+albedo_color = Color(0.69, 0.77, 0.83, 1)
+metallic = 0.72
+roughness = 0.28
+
+[sub_resource type="StandardMaterial3D" id="Mat_wood"]
+albedo_color = Color(0.25, 0.13, 0.065, 1)
+roughness = 0.7
+
+[sub_resource type="StandardMaterial3D" id="Mat_leather"]
+albedo_color = Color(0.43, 0.20, 0.095, 1)
+roughness = 0.8
+
+[sub_resource type="StandardMaterial3D" id="Mat_brass"]
+albedo_color = Color(0.78, 0.49, 0.13, 1)
+metallic = 0.65
+roughness = 0.3
+
+[sub_resource type="BoxMesh" id="GuardMesh"]
+size = Vector3(0.11, 0.35, 0.13)
+
+[sub_resource type="CylinderMesh" id="HandleMesh"]
+top_radius = 0.105
+bottom_radius = 0.135
+height = 0.78
+radial_segments = 10
+rings = 1
+
+[sub_resource type="CylinderMesh" id="BandMesh"]
+top_radius = 0.14
+bottom_radius = 0.14
+height = 0.045
+radial_segments = 10
+rings = 1
+
+[sub_resource type="SphereMesh" id="RivetMesh"]
+radial_segments = 8
+rings = 4
+
+[node name="Cuchillo_Medieval_3D" type="Node3D"]
+
+[node name="Hoja" type="CSGPolygon3D" parent="."]
+position = Vector3(0.08, 0.12, 0)
+polygon = PackedVector2Array(-1.42, 0.0, -0.12, 0.145, 0.0, 0.12, 0.0, -0.12, -0.12, -0.145)
+depth = 0.075
+material = SubResource("Mat_blade")
+
+[node name="Guarda_de_latón" type="MeshInstance3D" parent="."]
+position = Vector3(0.08, 0.12, 0)
+mesh = SubResource("GuardMesh")
+material_override = SubResource("Mat_brass")
+
+[node name="Mango_de_madera" type="MeshInstance3D" parent="."]
+position = Vector3(0.53, 0.12, 0)
+rotation_degrees = Vector3(0, 0, -90)
+mesh = SubResource("HandleMesh")
+material_override = SubResource("Mat_wood")
+
+[node name="Pomo_de_madera" type="MeshInstance3D" parent="."]
+position = Vector3(0.96, 0.12, 0)
+rotation_degrees = Vector3(0, 0, -90)
+scale = Vector3(1.05, 0.20, 1.05)
+mesh = SubResource("HandleMesh")
+material_override = SubResource("Mat_wood")
+
+[node name="Banda_cuero_1" type="MeshInstance3D" parent="."]
+position = Vector3(0.35, 0.12, 0)
+rotation_degrees = Vector3(0, 0, -90)
+mesh = SubResource("BandMesh")
+material_override = SubResource("Mat_leather")
+
+[node name="Banda_cuero_2" type="MeshInstance3D" parent="."]
+position = Vector3(0.56, 0.12, 0)
+rotation_degrees = Vector3(0, 0, -90)
+mesh = SubResource("BandMesh")
+material_override = SubResource("Mat_leather")
+
+[node name="Banda_cuero_3" type="MeshInstance3D" parent="."]
+position = Vector3(0.77, 0.12, 0)
+rotation_degrees = Vector3(0, 0, -90)
+mesh = SubResource("BandMesh")
+material_override = SubResource("Mat_leather")
+
+[node name="Remache_1" type="MeshInstance3D" parent="."]
+position = Vector3(0.4, 0.23, 0.105)
+scale = Vector3(0.065, 0.065, 0.025)
+mesh = SubResource("RivetMesh")
+material_override = SubResource("Mat_brass")
+
+[node name="Remache_2" type="MeshInstance3D" parent="."]
+position = Vector3(0.7, 0.23, 0.105)
+scale = Vector3(0.065, 0.065, 0.025)
+mesh = SubResource("RivetMesh")
+material_override = SubResource("Mat_brass")
+

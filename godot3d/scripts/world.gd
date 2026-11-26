@@ -22,20 +22,67 @@ const MAX_COOP_PLAYERS := 4
 const COOP_PORT := 7777
 const NPC_MOOD_DURATION := 90.0
 const NPC_MOOD_RECHARGE_DURATION := 2.5
+const NPC_MOOD_TRACK_WIDTH := 1.37
+const NPC_MOOD_FILL_CAP_RADIUS := 0.038
+const NPC_MOOD_FILL_HEIGHT := 0.074
 const BARD_CHEER_RECHARGE_DURATION := NPC_MOOD_RECHARGE_DURATION
 const BARD_CHEER_HOLD_DURATION := 8.0
 const BARD_CHEER_STRENGTH := 1.0 / 3.0
 const NPC_ZERO_MOOD_DEFEAT_COUNT := 3
-const GAME_DURATION_SECONDS := 600.0
+const GAME_DURATION_SECONDS := 900.0
+const ROULETTE_SPIN_DURATION := 4.8
+const ROULETTE_TICK_COUNT := 28
+const ROULETTE_OUTCOMES: Array[String] = [
+	"¡Velocidad aumentada durante 1 minuto!",
+	"¡Ganaste 1 minuto de tiempo!",
+	"¡Todos los NPC recuperaron el 100% de ánimo!",
+	"¡La ruleta completó la mitad de las cartas!",
+	"La ruleta quitó 1 minuto del reloj.",
+	"El ánimo de todos los NPC bajó al 50%.",
+	"Te mueves más lento durante 1 minuto.",
+	"El doble salto queda desactivado durante 1 minuto.",
+	"La misión de cartas se reinició."
+]
 const MENU_BACKGROUND_PATH := "res://assets/ui/medieval_menu_background.png"
+const LOADING_BACKGROUND_PATH := "res://assets/ui/loading_kingdom_riverside.png"
+const WATER_LOADING_BACKGROUND: Texture2D = preload("res://assets/ui/loading_kingdom_underwater.png")
+const DEFEAT_BACKGROUND: Texture2D = preload("res://assets/ui/defeat_kingdom_chaos.png")
 const MENU_BUTTONS_PATH := "res://assets/ui/medieval_buttons_atlas.png"
 const GAME_UI_ATLAS_PATH := "res://assets/ui/game_ui_atlas.png"
+const ROLE_SYMBOLS_ATLAS: Texture2D = preload("res://assets/ui/role_symbols.png")
+const ROLE_SYMBOL_MEDALLION: Texture2D = preload("res://assets/ui/role_symbol_medallion_02.png")
+const RESTART_BUTTON_MEDALLION: Texture2D = preload("res://assets/ui/restart_button_medallion.png")
+const NPC_MOOD_FRAME: Texture2D = preload("res://assets/ui/npc_mood_frame_3d.png")
+const NPC_INTERACTION_PLAQUE: Texture2D = preload("res://assets/ui/npc_interaction_plaque_3d.png")
+const DIALOGUE_BOARDS_ATLAS: Texture2D = preload("res://assets/ui/dialogue_boards_medieval.png")
 const WHALE_PUZZLE_TEXTURE: Texture2D = preload("res://assets/ui/whale_puzzle.svg")
 const CARTOON_FONT: FontFile = preload("res://assets/ui/fonts/LilitaOne-Regular.ttf")
 const CHEST_PROGRESS_PATH := "user://chest_progress.cfg"
 const DAY_PHASE_DURATION := 240.0
 const CHEST_OPEN_SOUND_PATH := "res://assets/audio/chest_open.wav"
 const CHEST_NEAR_SOUND_PATH := "res://assets/audio/chest_near_loop.wav"
+const GAME_AMBIENT_MUSIC_PATH := "res://assets/audio/kingdom_ambient.mp3"
+const NPC_INTERACTION_SOUND_PATH := "res://assets/audio/npc_interaction_villager.mp3"
+const WATER_SPLASH_SOUND_PATH := "res://assets/audio/water_splash.mp3"
+const PLAYER_NAME_TIMES_SCREEN: Texture2D = preload("res://assets/ui/player_name_times_screen.png")
+const PLAYER_RECORDS_PATH := "user://player_completion_times.cfg"
+const STORY_CINEMATIC_PANEL: Texture2D = preload("res://assets/ui/story_cinematic_panel.png")
+const STORY_NARRATION_PATHS: Array[String] = [
+	"res://assets/audio/story_intro_1.mp3",
+	"res://assets/audio/story_intro_2.mp3",
+	"res://assets/audio/story_intro_3.mp3",
+	"res://assets/audio/story_intro_4.mp3",
+	"res://assets/audio/story_intro_5.mp3",
+	"res://assets/audio/story_intro_6.mp3"
+]
+const STORY_NARRATION_CAPTIONS: Array[String] = [
+	"En el reino de Ciudad en Red, sus habitantes vivían en paz. El comercio florecía y la gente confiaba en sus vecinos.",
+	"Pero el rey, cansado de sostener cada año la prosperidad del reino, concibió un plan en secreto: robar sus riquezas y esconder su culpa.",
+	"Sembró desinformación. Con mensajes y rumores engañosos enfrentó a los habitantes; la economía se debilitó y la confianza se quebró.",
+	"Entre cartas dudosas, estafas y retos peligrosos surgieron cuatro héroes: el Héroe, el Mensajero, el Bardo y el Revolucionario.",
+	"Cada uno aportará sus talentos: reunir pruebas, llevar mensajes, levantar el ánimo y ayudar al pueblo a reconocer la verdad.",
+	"Juntos revelarán el plan del rey y pondrán fin al engaño. Si el reino aprende a verificar y apoyarse, un nuevo amanecer se alzará sobre Ciudad en Red."
+]
 const CHEST_NEAR_LOOP_START_SECONDS := 0.06
 const CHEST_PROXIMITY_RANGE := 8.0
 const INFORMATION_BOARD_SCENE := "res://scenes/props/tablon_anuncios_medieval_3d.tscn"
@@ -63,6 +110,13 @@ var hint: Label
 var hud: Label
 var panel: PanelContainer
 var panel_text: Label
+var dialogue_title_label: Label
+var dialogue_body_label: Label
+var dialogue_title_plaque: PanelContainer
+var dialogue_title_holder: Control
+var dialogue_source_cache := ""
+var prompt_keycap_label: Label
+var prompt_action_label: Label
 var panel_uses_q := false
 var question_index := -1
 var answered := 0
@@ -119,6 +173,17 @@ var guardian8_jump_animation_names: Array[String] = []
 var guardian8_mission_completed := false
 var guardian8_owner_peer_id := 0
 var guardian8_dialogue_pending := false
+var tied_guard_9: Node3D
+var tied_guard_9_start_transform := Transform3D.IDENTITY
+var tied_guard_9_original_transforms: Dictionary = {}
+var rescue_knife: Node3D
+var rescue_knife_start_transform := Transform3D.IDENTITY
+var revolutionary_rescue_started := false
+var revolutionary_rescue_completed := false
+var revolutionary_rescue_has_knife := false
+var revolutionary_knife_inspected := false
+var revolutionary_rescue_animation_active := false
+var revolutionary_rescue_dialogue_stage := ""
 var whale_puzzle_active := false
 var whale_puzzle_tiles: Array[int] = []
 var whale_puzzle_rotations: Array[int] = []
@@ -131,6 +196,7 @@ var whale_puzzle_panel: PanelContainer
 var whale_puzzle_grid: GridContainer
 var whale_puzzle_title: Label
 var whale_puzzle_instructions: Label
+var whale_puzzle_dim: ColorRect
 var fraud_guard_nodes: Dictionary = {}
 var fraud_guard7_spoken := false
 var fraud_letter_received := false
@@ -150,22 +216,40 @@ var firefly_time := 0.0
 var firefly_update_accumulator := 0.0
 var ticket_terminal_position := Vector3(-10000, 0, 0)
 var research_desk_position := Vector3(-10000, 0, 0)
-var roulette_position := Vector3(-10000, 0, 0)
-var roulette_interaction_range := 6.0
-var roulette_node: Node3D
-var roulette_used := false
+var roulette_wheels: Array[Dictionary] = []
+var roulette_role_uses: Dictionary = {}
+var roulette_spinning_wheels: Dictionary = {}
+var roulette_tick_stream: AudioStreamWAV
 var npc_mood_duration := NPC_MOOD_DURATION
 var game_time_remaining := GAME_DURATION_SECONDS
 var game_running := false
 var lights_enabled := true
 var menu_root: Control
+var defeat_background: TextureRect
 var home_screen: Control
 var menu_panel: PanelContainer
 var menu_content: VBoxContainer
 var gameplay_top_panel: PanelContainer
+var gameplay_top_panel_home_position := Vector2(22, 130)
+var gameplay_top_panel_tween: Tween
+var gameplay_status_requested_visible := false
+var gameplay_role_symbols_row: HBoxContainer
+var gameplay_role_symbols_home_position := Vector2(22, 12)
 var gameplay_bottom_panel: PanelContainer
 var gameplay_crosshair: Label
 var gameplay_started := false
+var player_name_screen: Control
+var player_name_input: LineEdit
+var player_name_field_cover: ColorRect
+var player_name_placeholder_label: Label
+var player_name_message: Label
+var leaderboard_overlay: Control
+var leaderboard_rows: VBoxContainer
+var leaderboard_records: Array[Dictionary] = []
+var match_elapsed_seconds := 0.0
+var completion_recorded_for_match := false
+var story_cinematic_active := false
+var spawn_transition_active := false
 var time_progress: ProgressBar
 var time_label: Label
 var time_fill_style: StyleBoxFlat
@@ -174,6 +258,7 @@ var mission_button_style: StyleBoxFlat
 var time_frame: TextureRect
 var time_label_frame: TextureRect
 var restart_button: Button
+var restart_button_tween: Tween
 var restart_confirmation_root: Control
 var restart_confirmation_panel: PanelContainer
 var timer_container: Control
@@ -197,6 +282,8 @@ var random_room_code := ""
 var game_timer_timeout := false
 var last_defeat_cause := "timeout"
 var speed_boost_time := 0.0
+var slow_time := 0.0
+var double_jump_disabled_time := 0.0
 var water_respawn_pending := false
 var permanent_spawn_position := Vector3.ZERO
 var permanent_spawn_position_set := false
@@ -207,6 +294,9 @@ var day_cycle_elapsed := 0.0
 var day_phase_presets: Array[Dictionary] = []
 var chest_open_stream: AudioStreamWAV
 var chest_near_stream: AudioStreamWAV
+var game_ambient_music: AudioStreamPlayer
+var npc_interaction_voice_stream: AudioStreamMP3
+var water_splash_player: AudioStreamPlayer
 var collected_info: Dictionary = {}
 var info_delivered := false
 var board_pages_placed := 0
@@ -258,8 +348,13 @@ func _ready() -> void:
 	_setup_npcs()
 	_setup_fraud_case_npcs()
 	_setup_guardia_08()
+	_setup_revolutionary_rescue()
 	_setup_guardia_07_writer()
 	_load_chest_open_sound()
+	_setup_game_ambient_music()
+	_load_npc_interaction_voice()
+	_setup_water_splash_sound()
+	_load_player_completion_times()
 	_discover_information_chests()
 	_find_ticket_terminal()
 	_find_roulette()
@@ -661,7 +756,9 @@ func _add_stair_ramp_collision(stair_root: Node3D) -> void:
 func _process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
+	_sync_dialogue_board_text()
 	if game_running:
+		match_elapsed_seconds += delta
 		_update_guardia_08_hop(delta)
 		_update_npc_moods(delta)
 		_update_npc_facing(delta)
@@ -671,6 +768,7 @@ func _process(delta: float) -> void:
 		_animate_fireflies(delta)
 		_update_chest_proximity_audio()
 		_update_nearest_station()
+		_sync_interaction_plaque()
 		game_time_remaining = maxf(0.0, game_time_remaining - delta)
 		_update_timer_hud()
 		if game_time_remaining <= 0.0 and not game_timer_timeout:
@@ -685,8 +783,16 @@ func _process(delta: float) -> void:
 			rpc("_receive_remote_transform", multiplayer.get_unique_id(), player.global_position, player.rotation.y)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if not game_running and is_instance_valid(player_name_screen) and player_name_screen.visible and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		_show_menu_page("home")
+		get_viewport().set_input_as_handled()
+		return
 	# Keep gameplay controls completely inactive while any menu or lobby is open.
 	if not game_running:
+		return
+	if event is InputEventKey and event.pressed and not event.echo and (event.keycode == KEY_CTRL or event.physical_keycode == KEY_CTRL):
+		_animate_gameplay_status_panel(not gameplay_status_requested_visible)
+		get_viewport().set_input_as_handled()
 		return
 	if whale_puzzle_active:
 		if event is InputEventKey and event.pressed and not event.echo:
@@ -746,6 +852,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_start_guardian8_interaction()
 				get_viewport().set_input_as_handled()
 				return
+			if String(extra_target.get("kind", "")) == "revolutionary_guard":
+				_start_revolutionary_guard_interaction()
+				get_viewport().set_input_as_handled()
+				return
 			if String(extra_target.get("kind", "")) == "fraud_npc" or (fraud_letter_received and String(extra_target.get("kind", "")) == "npc"):
 				_open_nearest_station()
 				get_viewport().set_input_as_handled()
@@ -762,12 +872,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		var interaction_target := _nearest_interaction_target(true)
-		if String(interaction_target.get("kind", "")) in ["guardian8", "fraud_npc"] or (fraud_letter_received and String(interaction_target.get("kind", "")) == "npc"):
+		if String(interaction_target.get("kind", "")) in ["guardian8", "revolutionary_guard", "fraud_npc"] or (fraud_letter_received and String(interaction_target.get("kind", "")) == "npc"):
 			get_viewport().set_input_as_handled()
 			return
 		if active_role == "Influencer" and not influencer_has_information and not fraud_letter_received and String(interaction_target.get("kind", "")) == "npc":
 			var npc_index := int(interaction_target.npc_index)
 			if float(bard_cooldowns.get(npc_index, 0.0)) <= 0.0:
+				_play_npc_interaction_voice(interaction_target.node as Node3D)
 				bard_cheer_target = npc_index
 				bard_cheer_elapsed = 0.0
 			get_viewport().set_input_as_handled()
@@ -927,7 +1038,8 @@ func _setup_npcs() -> void:
 		_create_npc_night_light(npc)
 		var animator := _play_guard_idle_animations(npc)
 		var mood_bar := _create_npc_mood_bar(npc)
-		npc_targets.append({"node":npc, "position":npc.global_position, "name":npc_name, "mood":1.0, "seconds_left":npc_mood_duration, "recharging":false, "recharge_elapsed":0.0, "animator":animator, "bar":mood_bar, "index":i})
+		var interaction_badge := _create_npc_interaction_badge()
+		npc_targets.append({"node":npc, "position":npc.global_position, "name":npc_name, "mood":1.0, "seconds_left":npc_mood_duration, "recharging":false, "recharge_elapsed":0.0, "animator":animator, "bar":mood_bar, "interaction_badge":interaction_badge, "index":i})
 
 func _setup_fraud_case_npcs() -> void:
 	fraud_guard_nodes.clear()
@@ -937,6 +1049,36 @@ func _setup_fraud_case_npcs() -> void:
 			fraud_guard_nodes[guard_name] = guard
 			guard.set_meta("fraud_case_guard", true)
 			guard.set_meta("npc_dialogue", "Vecino de guardia. Tiene una historia que contar.")
+	_start_guardia_06_concern_animation()
+
+func _start_guardia_06_concern_animation() -> void:
+	# Guardia 6 starts the match visibly uneasy; keep his concern animation looping.
+	var guard := fraud_guard_nodes.get("Guardia_06") as Node3D
+	if guard == null:
+		return
+	var found_animation := false
+	for candidate in guard.find_children("*", "AnimationPlayer", true, false):
+		var animator := candidate as AnimationPlayer
+		if animator == null:
+			continue
+		var concern_name := ""
+		for animation_name in animator.get_animation_list():
+			var normalized_name := String(animation_name).to_lower()
+			if normalized_name in ["worried", "concern", "emote-no", "emote_no"]:
+				concern_name = String(animation_name)
+				if normalized_name in ["worried", "concern"]:
+					break
+		if concern_name.is_empty():
+			continue
+		var concern_animation := animator.get_animation(concern_name)
+		if concern_animation == null:
+			continue
+		concern_animation.loop_mode = Animation.LOOP_LINEAR
+		animator.speed_scale = 0.8
+		animator.play(concern_name, 0.12)
+		found_animation = true
+	if not found_animation:
+		push_warning("Guardia 6 no tiene una animación de preocupación disponible.")
 
 func _setup_guardia_07_writer() -> void:
 	# Guardia 7 is the letter writer; preserve the map-authored position.
@@ -987,6 +1129,52 @@ func _setup_guardia_08() -> void:
 				jump_animation.loop_mode = Animation.LOOP_LINEAR
 			guardian8_animators.append(animator)
 			guardian8_jump_animation_names.append(jump_name)
+
+func _setup_revolutionary_rescue() -> void:
+	tied_guard_9 = get_node_or_null("Guardia_09") as Node3D
+	rescue_knife = get_node_or_null("Cuchillo_Medieval") as Node3D
+	if is_instance_valid(tied_guard_9):
+		tied_guard_9_start_transform = tied_guard_9.global_transform
+		tied_guard_9_original_transforms.clear()
+		for child in tied_guard_9.get_children():
+			if child is Node3D and String(child.name).begins_with("GuardiaOriginal"):
+				tied_guard_9_original_transforms[String(child.name)] = child.transform
+	else:
+		push_warning("No se encontró Guardia_09; la misión del Revolucionario queda desactivada.")
+	if is_instance_valid(rescue_knife):
+		rescue_knife_start_transform = rescue_knife.global_transform
+		rescue_knife.visible = true
+	else:
+		push_warning("No se encontró Cuchillo_Medieval; la misión del Revolucionario queda desactivada.")
+
+func _reset_revolutionary_rescue() -> void:
+	revolutionary_rescue_started = false
+	revolutionary_rescue_completed = false
+	revolutionary_rescue_has_knife = false
+	revolutionary_knife_inspected = false
+	revolutionary_rescue_animation_active = false
+	revolutionary_rescue_dialogue_stage = ""
+	if is_instance_valid(rescue_knife):
+		if rescue_knife.get_parent() != self:
+			rescue_knife.reparent(self, false)
+		rescue_knife.global_transform = rescue_knife_start_transform
+		rescue_knife.visible = true
+		for candidate in rescue_knife.find_children("*", "CollisionObject3D", true, false):
+			var collision_object := candidate as CollisionObject3D
+			collision_object.collision_layer = 1
+			collision_object.collision_mask = 1
+	if is_instance_valid(tied_guard_9):
+		tied_guard_9.global_transform = tied_guard_9_start_transform
+		tied_guard_9.set_process(true)
+		for child_name in tied_guard_9_original_transforms:
+			var original := tied_guard_9.get_node_or_null(NodePath(String(child_name))) as Node3D
+			if original != null:
+				original.transform = tied_guard_9_original_transforms[child_name]
+		for candidate in tied_guard_9.find_children("*", "Node3D", true, false):
+			if String(candidate.name).to_lower().contains("sogas"):
+				(candidate as Node3D).visible = true
+		if tied_guard_9.has_method("restaurar_suspension"):
+			tied_guard_9.call("restaurar_suspension")
 
 func _start_guardia_08_hop() -> void:
 	guardian8_bob_elapsed = 0.0
@@ -1143,39 +1331,112 @@ func _append_clear_guard_candidate(candidates: Array[Dictionary], space: Physics
 func _create_npc_mood_bar(npc: Node3D) -> Node3D:
 	var bar_root := Node3D.new()
 	bar_root.name = "MoodStatusBar"
-	bar_root.position = npc.global_position + Vector3(0, 2.25, 0)
+	bar_root.position = npc.global_position + Vector3(0, 3.15, 0)
 	add_child(bar_root)
-	var background := MeshInstance3D.new()
-	background.name = "Background"
-	var background_mesh := BoxMesh.new()
-	background_mesh.size = Vector3(1.45, 0.16, 0.045)
-	background.mesh = background_mesh
-	var background_material := StandardMaterial3D.new()
-	background_material.albedo_color = Color("182131")
-	background_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	background.material_override = background_material
-	bar_root.add_child(background)
-	var fill := MeshInstance3D.new()
+	_add_npc_bar_texture(bar_root, "OrnateMoodFrame", NPC_MOOD_FRAME, Vector2(1.78, 0.60), Vector3.ZERO)
+	var fill := Node3D.new()
 	fill.name = "Fill"
-	var fill_mesh := BoxMesh.new()
-	fill_mesh.size = Vector3(1.32, 0.09, 0.06)
-	fill.mesh = fill_mesh
-	fill.position = Vector3(0, 0, 0.035)
-	var fill_material := StandardMaterial3D.new()
-	fill_material.albedo_color = Color("65e6a5")
-	fill_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	fill.material_override = fill_material
 	bar_root.add_child(fill)
+	var fill_core := MeshInstance3D.new()
+	fill_core.name = "FillCore"
+	var fill_mesh := BoxMesh.new()
+	fill_mesh.size = Vector3(NPC_MOOD_TRACK_WIDTH - NPC_MOOD_FILL_CAP_RADIUS * 2.0, NPC_MOOD_FILL_HEIGHT, 0.026)
+	fill_core.mesh = fill_mesh
+	var fill_material := StandardMaterial3D.new()
+	fill_material.albedo_color = Color("ffd45a")
+	fill_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fill_core.material_override = fill_material
+	fill_core.position.z = 0.045
+	fill.add_child(fill_core)
+	for cap_name in ["FillLeftCap", "FillRightCap"]:
+		var cap := MeshInstance3D.new()
+		cap.name = cap_name
+		var cap_mesh := SphereMesh.new()
+		cap_mesh.radius = NPC_MOOD_FILL_CAP_RADIUS
+		cap_mesh.height = NPC_MOOD_FILL_HEIGHT
+		cap.mesh = cap_mesh
+		cap.material_override = fill_material
+		cap.scale.z = 0.35
+		cap.position.z = 0.045
+		fill.add_child(cap)
+	_add_npc_bar_label(bar_root, "MoodLabelShadow", "ÁNIMO · 100%", Vector3(0.018, 0.40, -0.018), 31, Color("24130c"))
+	_add_npc_bar_label(bar_root, "MoodLabel", "ÁNIMO · 100%", Vector3(0, 0.42, 0.01), 31, Color("fff0bd"))
+	return bar_root
+
+func _add_npc_bar_texture(parent: Node3D, node_name: String, texture: Texture2D, size: Vector2, at: Vector3) -> MeshInstance3D:
+	var frame := MeshInstance3D.new()
+	frame.name = node_name
+	var quad := QuadMesh.new()
+	quad.size = size
+	frame.mesh = quad
+	var material := StandardMaterial3D.new()
+	material.albedo_texture = texture
+	material.albedo_color = Color.WHITE
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	frame.material_override = material
+	frame.position = at
+	frame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(frame)
+	return frame
+
+func _add_npc_bar_box(parent: Node3D, node_name: String, box_size: Vector3, at: Vector3, tint: Color, z_rotation := 0.0) -> MeshInstance3D:
+	var mesh_node := MeshInstance3D.new()
+	mesh_node.name = node_name
+	var box := BoxMesh.new()
+	box.size = box_size
+	mesh_node.mesh = box
+	var material := StandardMaterial3D.new()
+	material.albedo_color = tint
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.roughness = 0.58
+	mesh_node.material_override = material
+	mesh_node.position = at
+	mesh_node.rotation.z = deg_to_rad(z_rotation)
+	parent.add_child(mesh_node)
+	return mesh_node
+
+func _add_npc_bar_label(parent: Node3D, node_name: String, value: String, at: Vector3, size: int, tint: Color) -> Label3D:
 	var label := Label3D.new()
-	label.name = "MoodLabel"
-	label.text = "ÁNIMO · 100%"
-	label.position = Vector3(0, 0.22, 0)
-	label.font_size = 28
+	label.name = node_name
+	label.text = value
+	label.position = at
+	label.font = CARTOON_FONT
+	label.font_size = size
 	label.pixel_size = 0.004
+	label.modulate = tint
+	label.outline_size = 7
+	label.outline_modulate = Color("3c2012")
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.no_depth_test = false
-	bar_root.add_child(label)
-	return bar_root
+	parent.add_child(label)
+	return label
+
+func _create_npc_interaction_badge() -> Node3D:
+	var badge := Node3D.new()
+	badge.name = "NpcInteractionBadge"
+	badge.visible = false
+	add_child(badge)
+	_add_npc_bar_texture(badge, "OrnateInteractionPlaque", NPC_INTERACTION_PLAQUE, Vector2(1.62, 0.66), Vector3.ZERO)
+	_add_npc_bar_label(badge, "KeyLabelShadow", "E", Vector3(-0.45, -0.075, 0.045), 51, Color("8c6338"))
+	_add_npc_bar_label(badge, "KeyLabel", "E", Vector3(-0.46, -0.06, 0.06), 49, Color("3b2113"))
+	_add_npc_bar_label(badge, "ActionLabelShadow", "HABLAR", Vector3(0.23, -0.065, 0.035), 29, Color("3b1d0f"))
+	_add_npc_bar_label(badge, "ActionLabel", "HABLAR", Vector3(0.22, -0.045, 0.055), 27, Color("fff0bd"))
+	return badge
+
+func _set_npc_badge_action(badge: Node3D, action: String) -> void:
+	var label := badge.get_node_or_null("ActionLabel") as Label3D
+	var label_shadow := badge.get_node_or_null("ActionLabelShadow") as Label3D
+	if label == null:
+		return
+	label.text = action
+	if label_shadow != null:
+		label_shadow.text = action
+	label.font_size = 22 if action.length() > 9 else 27
+	if label_shadow != null:
+		label_shadow.font_size = label.font_size + 2
 
 func _update_npc_moods(delta: float) -> void:
 	for key in bard_cooldowns.keys():
@@ -1199,20 +1460,40 @@ func _update_npc_moods(delta: float) -> void:
 			zero_mood_count += 1
 		var bar := state.bar as Node3D
 		if is_instance_valid(bar):
-			bar.global_position = npc.global_position + Vector3(0, 2.25, 0)
+			bar.global_position = npc.global_position + Vector3(0, 3.15, 0)
 			if camera != null:
 				bar.global_rotation.y = camera.global_rotation.y
-			var fill := bar.get_node_or_null("Fill") as MeshInstance3D
+			var fill := bar.get_node_or_null("Fill") as Node3D
 			if fill:
 				var ratio := clampf(float(state.mood), 0.0, 1.0)
-				fill.scale.x = maxf(ratio, 0.01)
-				fill.position.x = -0.66 * (1.0 - ratio)
-				var material := fill.material_override as StandardMaterial3D
+				var fill_width := NPC_MOOD_TRACK_WIDTH * ratio
+				var fill_core := fill.get_node_or_null("FillCore") as MeshInstance3D
+				if fill_core and fill_core.mesh is BoxMesh:
+					var core_mesh := fill_core.mesh as BoxMesh
+					core_mesh.size.x = maxf(fill_width - NPC_MOOD_FILL_CAP_RADIUS * 2.0, 0.001)
+					fill_core.position.x = -NPC_MOOD_TRACK_WIDTH * 0.5 + fill_width * 0.5
+				var left_cap := fill.get_node_or_null("FillLeftCap") as MeshInstance3D
+				var right_cap := fill.get_node_or_null("FillRightCap") as MeshInstance3D
+				if left_cap:
+					left_cap.position.x = -NPC_MOOD_TRACK_WIDTH * 0.5 + NPC_MOOD_FILL_CAP_RADIUS
+					left_cap.visible = ratio > 0.005
+				if right_cap:
+					right_cap.position.x = -NPC_MOOD_TRACK_WIDTH * 0.5 + fill_width - NPC_MOOD_FILL_CAP_RADIUS
+					right_cap.visible = ratio > 0.06
+				var material := fill.get_node_or_null("FillCore").material_override as StandardMaterial3D if fill.get_node_or_null("FillCore") != null else null
 				if material:
-					material.albedo_color = Color("65e6a5").lerp(Color("ff6b76"), 1.0 - ratio)
+					material.albedo_color = Color("ffd45a").lerp(Color("c77e27"), 1.0 - ratio)
 			var label := bar.get_node_or_null("MoodLabel") as Label3D
+			var label_shadow := bar.get_node_or_null("MoodLabelShadow") as Label3D
 			if label:
 				label.text = "ÁNIMO · %d%%" % roundi(float(state.mood) * 100.0)
+			if label_shadow:
+				label_shadow.text = "ÁNIMO · %d%%" % roundi(float(state.mood) * 100.0)
+			var interaction_badge := state.get("interaction_badge") as Node3D
+			if is_instance_valid(interaction_badge):
+				interaction_badge.global_position = npc.global_position + Vector3(0, 2.35, 0)
+				if camera != null:
+					interaction_badge.global_rotation.y = camera.global_rotation.y
 		npc_targets[i] = state
 	if game_running and zero_mood_count >= NPC_ZERO_MOOD_DEFEAT_COUNT:
 		_end_game(false, "low_morale")
@@ -1492,23 +1773,56 @@ func _find_research_desk() -> void:
 		research_desk_position = desk.global_position
 
 func _find_roulette() -> void:
-	roulette_node = get_node_or_null("prize-wheel2") as Node3D
-	if roulette_node == null:
-		for candidate in find_children("*", "Node3D", true, false):
-			var node := candidate as Node3D
-			if node.scene_file_path.to_lower().contains("prize-wheel.glb") or node.name.to_lower().contains("prize-wheel"):
-				roulette_node = node
-				break
-	if is_instance_valid(roulette_node):
-		var wheel_bounds := _world_visual_bounds(roulette_node)
-		roulette_position = wheel_bounds.get_center()
-		roulette_interaction_range = maxf(6.0, wheel_bounds.size.length() * 0.35)
-		_enable_roulette_emission(roulette_node)
-		_add_world_glow(roulette_position, Color("55ddff"), maxf(10.0, wheel_bounds.size.length() * 0.8), 3.2)
-		return
-	if stations.size() > 1:
-		roulette_position = stations[1].position * MAP_SCALE + Vector3(0, 3.0, 0)
-		_add_world_glow(roulette_position, Color("55ddff"), 10.0, 3.2)
+	roulette_wheels.clear()
+	roulette_tick_stream = _make_roulette_tick_stream()
+	# These are the two colorful spinning discs placed in the editable map.
+	# The nearby prize2/prize3 meshes are their stationary bases and stay still.
+	for wheel_id in ["rotate-z2", "rotate-z3"]:
+		var wheel := get_node_or_null(NodePath(wheel_id)) as MeshInstance3D
+		if not is_instance_valid(wheel) or wheel.mesh == null:
+			continue
+		var wheel_bounds := _world_visual_bounds(wheel)
+		var wheel_position := wheel_bounds.get_center()
+		var radius := maxf(4.2, wheel_bounds.size.length() * 0.65)
+		_enable_roulette_emission(wheel)
+		_add_world_glow(wheel_position, Color("ffd45a"), maxf(8.0, wheel_bounds.size.length() * 0.9), 1.7)
+		roulette_wheels.append({
+			"id": wheel_id,
+			"node": wheel,
+			"position": wheel_position,
+			"range": radius
+		})
+	# Keep compatibility with a project copy that still uses the imported model name.
+	if roulette_wheels.is_empty():
+		var fallback := get_node_or_null("prize-wheel2") as Node3D
+		if fallback == null:
+			for candidate in find_children("*", "Node3D", true, false):
+				var node := candidate as Node3D
+				if node.scene_file_path.to_lower().contains("prize-wheel.glb") or node.name.to_lower().contains("prize-wheel"):
+					fallback = node
+					break
+		if is_instance_valid(fallback):
+			var fallback_bounds := _world_visual_bounds(fallback)
+			var fallback_position := fallback_bounds.get_center()
+			_enable_roulette_emission(fallback)
+			_add_world_glow(fallback_position, Color("ffd45a"), maxf(8.0, fallback_bounds.size.length() * 0.9), 1.7)
+			roulette_wheels.append({"id":"prize-wheel", "node":fallback, "position":fallback_position, "range":5.0})
+
+func _make_roulette_tick_stream() -> AudioStreamWAV:
+	var stream := AudioStreamWAV.new()
+	stream.mix_rate = 22050
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.stereo = false
+	var frame_count := 1102
+	var samples := PackedByteArray()
+	samples.resize(frame_count * 2)
+	for frame in range(frame_count):
+		var t := float(frame) / float(stream.mix_rate)
+		var envelope := exp(-t * 55.0)
+		var sample := int(sin(TAU * 1450.0 * t) * envelope * 7800.0)
+		samples.encode_s16(frame * 2, sample)
+	stream.data = samples
+	return stream
 
 func _world_visual_bounds(root: Node3D) -> AABB:
 	var found := false
@@ -2097,32 +2411,31 @@ func _begin_water_respawn() -> void:
 	if water_respawn_pending or not game_running or not is_instance_valid(player):
 		return
 	water_respawn_pending = true
+	_play_water_splash_sound()
+	spawn_transition_active = true
 	player.controls_enabled = false
 	player.set_physics_process(false)
 	player.velocity = Vector3.ZERO
 	player.visible = false
-	var wait_label := Label.new()
-	wait_label.name = "WaterRespawnMessage"
-	wait_label.set_anchors_preset(Control.PRESET_CENTER)
-	wait_label.position = Vector2(-260, 30)
-	wait_label.custom_minimum_size = Vector2(520, 64)
-	wait_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_style_cartoon_text(wait_label, 28)
-	wait_label.add_theme_color_override("font_color", Color("d8f2ff"))
-	if ui_layer != null:
-		ui_layer.add_child(wait_label)
+	var transition := _create_loading_transition(true)
+	var water_loading_tween := create_tween()
+	water_loading_tween.tween_property(transition.bar, "value", 100.0, 10.0).set_trans(Tween.TRANS_LINEAR)
 	for seconds_left in range(10, 0, -1):
-		if is_instance_valid(wait_label):
-			wait_label.text = "¡AGUA! REGRESO AL ESTANDARTE · %d" % seconds_left
+		if is_instance_valid(transition.status):
+			transition.status.text = "REGRESO EN %d SEGUNDO%s" % [seconds_left, "" if seconds_left == 1 else "S"]
 		await get_tree().create_timer(1.0).timeout
 	if not is_instance_valid(player):
+		if is_instance_valid(transition.layer):
+			transition.layer.queue_free()
 		water_respawn_pending = false
+		spawn_transition_active = false
 		return
-	if is_instance_valid(wait_label):
-		wait_label.queue_free()
 	if not game_running:
+		if is_instance_valid(transition.layer):
+			transition.layer.queue_free()
 		player.visible = true
 		water_respawn_pending = false
+		spawn_transition_active = false
 		return
 	var safe_spawn := _find_safe_spawn()
 	player.global_position = safe_spawn + Vector3(0, 10, 0)
@@ -2132,7 +2445,7 @@ func _begin_water_respawn() -> void:
 	player.controls_enabled = false
 	player.set_physics_process(true)
 	water_respawn_pending = false
-	_start_spawn_intro()
+	await _finish_spawn_transition(transition, water_loading_tween, 10.0)
 
 func _spawn_capsule_is_clear(space: PhysicsDirectSpaceState3D, capsule: CapsuleShape3D, x: float, z: float, ground_y: float) -> bool:
 	var overlap := PhysicsShapeQueryParameters3D.new()
@@ -2198,42 +2511,369 @@ func _build_camera() -> void:
 	# scene tree; explicitly activate it only after both camera nodes are attached.
 	camera.make_current()
 
+func _create_loading_transition(is_water: bool) -> Dictionary:
+	var transition_layer := CanvasLayer.new()
+	transition_layer.name = "WaterLoadingTransition" if is_water else "SpawnTransition"
+	transition_layer.layer = 100
+	add_child(transition_layer)
+	var loading_image := TextureRect.new()
+	loading_image.name = "LoadingKingdomBackground"
+	loading_image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	loading_image.texture = WATER_LOADING_BACKGROUND if is_water else load(LOADING_BACKGROUND_PATH) as Texture2D
+	loading_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	loading_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	loading_image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	transition_layer.add_child(loading_image)
+	var background := ColorRect.new()
+	background.name = "LoadingBackground"
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	background.color = Color(0.035, 0.055, 0.09, 0.28) if not is_water else Color(0.015, 0.08, 0.14, 0.14)
+	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	transition_layer.add_child(background)
+	var title := Label.new()
+	title.set_anchors_preset(Control.PRESET_CENTER)
+	title.position = Vector2(-320, -72)
+	title.custom_minimum_size = Vector2(640, 60)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.text = "REGRESANDO AL ESTANDARTE" if is_water else "PREPARANDO EL REINO"
+	_style_cartoon_text(title, 36)
+	title.add_theme_color_override("font_color", Color("c7f0ff") if is_water else Color("ffe39a"))
+	if is_water:
+		title.add_theme_color_override("font_outline_color", Color("075078"))
+		title.add_theme_color_override("font_shadow_color", Color(0.015, 0.09, 0.17, 0.85))
+	background.add_child(title)
+	var loading_bar := ProgressBar.new()
+	loading_bar.set_anchors_preset(Control.PRESET_CENTER)
+	loading_bar.position = Vector2(-250, 12)
+	loading_bar.custom_minimum_size = Vector2(500, 34)
+	loading_bar.min_value = 0.0
+	loading_bar.max_value = 100.0
+	loading_bar.value = 8.0 if not is_water else 0.0
+	loading_bar.show_percentage = false
+	var loading_track := StyleBoxFlat.new()
+	loading_track.bg_color = Color("203545") if is_water else Color("3a2114")
+	loading_track.border_color = Color("aeeaff") if is_water else Color("ffd56a")
+	loading_track.set_border_width_all(4)
+	loading_track.set_corner_radius_all(13)
+	loading_track.shadow_color = Color(0.02, 0.12, 0.2, 0.85) if is_water else Color(0.07, 0.035, 0.012, 0.8)
+	loading_track.shadow_size = 7
+	loading_track.shadow_offset = Vector2(0, 3)
+	loading_bar.add_theme_stylebox_override("background", loading_track)
+	var loading_fill := StyleBoxFlat.new()
+	loading_fill.bg_color = Color("39b8f2") if is_water else Color("ffc83d")
+	loading_fill.border_color = Color("d7f7ff") if is_water else Color("fff0a8")
+	loading_fill.set_border_width_all(1)
+	loading_fill.set_corner_radius_all(9)
+	loading_fill.shadow_color = Color(0.08, 0.68, 1.0, 0.9) if is_water else Color(1.0, 0.64, 0.12, 0.8)
+	loading_fill.shadow_size = 5
+	loading_fill.shadow_offset = Vector2.ZERO
+	loading_bar.add_theme_stylebox_override("fill", loading_fill)
+	background.add_child(loading_bar)
+	var status := Label.new()
+	status.name = "LoadingStatus"
+	status.set_anchors_preset(Control.PRESET_CENTER)
+	status.position = Vector2(-300, 58)
+	status.custom_minimum_size = Vector2(600, 36)
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status.add_theme_color_override("font_color", Color("e5f7ff"))
+	_style_cartoon_text(status, 20)
+	status.visible = is_water
+	if is_water:
+		status.text = "REGRESO EN 10 SEGUNDOS"
+	background.add_child(status)
+	var safety_card := PanelContainer.new()
+	safety_card.name = "SafetyReflectionCard"
+	safety_card.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	safety_card.offset_left = 90.0
+	safety_card.offset_top = -144.0
+	safety_card.offset_right = -90.0
+	safety_card.offset_bottom = -24.0
+	safety_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var parchment := StyleBoxFlat.new()
+	parchment.bg_color = Color("f0dfbb", 0.96)
+	parchment.border_color = Color("42b9e8") if is_water else Color("a56627")
+	parchment.set_border_width_all(3)
+	parchment.set_corner_radius_all(16)
+	parchment.shadow_color = Color(0.015, 0.10, 0.18, 0.7) if is_water else Color(0.05, 0.025, 0.01, 0.65)
+	parchment.shadow_size = 10
+	parchment.shadow_offset = Vector2(0, 5)
+	parchment.content_margin_left = 18.0
+	parchment.content_margin_right = 18.0
+	parchment.content_margin_top = 7.0
+	parchment.content_margin_bottom = 7.0
+	safety_card.add_theme_stylebox_override("panel", parchment)
+	background.add_child(safety_card)
+	var reflection_stack := VBoxContainer.new()
+	reflection_stack.add_theme_constant_override("separation", 3)
+	safety_card.add_child(reflection_stack)
+	var reflection_heading := Label.new()
+	reflection_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	reflection_heading.text = "CONSEJO DEL REINO"
+	_style_cartoon_text(reflection_heading, 16)
+	reflection_heading.add_theme_color_override("font_color", Color("167da8") if is_water else Color("8a4f1f"))
+	reflection_heading.add_theme_constant_override("outline_size", 1)
+	reflection_heading.add_theme_color_override("font_outline_color", Color("d2f4ff") if is_water else Color("fff0bd"))
+	reflection_heading.add_theme_color_override("font_shadow_color", Color(0.03, 0.16, 0.25, 0.35) if is_water else Color(0, 0, 0, 0))
+	reflection_stack.add_child(reflection_heading)
+	var reflection := Label.new()
+	reflection.name = "SafetyReflection"
+	reflection.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	reflection.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	reflection.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	reflection.text = "Antes de creer o reenviar una carta, verifica su origen. No compartas datos ni monedas con desconocidos y aléjate de retos que pongan a alguien en peligro."
+	_style_cartoon_text(reflection, 18)
+	reflection.add_theme_color_override("font_color", Color("3c2a1c"))
+	reflection.add_theme_constant_override("outline_size", 0)
+	reflection.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0))
+	reflection.add_theme_constant_override("shadow_offset_x", 0)
+	reflection.add_theme_constant_override("shadow_offset_y", 0)
+	reflection_stack.add_child(reflection)
+	return {"layer":transition_layer, "image":loading_image, "veil":background, "title":title, "bar":loading_bar, "status":status, "card":safety_card, "started_msec":Time.get_ticks_msec()}
+
 func _start_spawn_intro() -> void:
-	# Brief third-person arrival: the character drops into the clear starting
-	# area, then the view settles into first person after landing.
-	var arrival_camera := Camera3D.new()
-	arrival_camera.name = "ArrivalCamera"
-	arrival_camera.fov = 58.0
-	arrival_camera.position = player.global_position + Vector3(-8, 5, 12)
-	add_child(arrival_camera)
-	arrival_camera.look_at(Vector3(player.position.x, 0, player.position.z), Vector3.UP)
-	arrival_camera.make_current()
-	var arrival_label := Label.new()
-	arrival_label.name = "ArrivalMessage"
-	arrival_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	arrival_label.position = Vector2(-220, 120)
-	arrival_label.custom_minimum_size = Vector2(440, 44)
-	arrival_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	arrival_label.text = "LLEGADA A CIUDAD EN RED"
-	_style_cartoon_text(arrival_label, 28)
-	arrival_label.add_theme_color_override("font_color", Color("e8f5ff"))
-	if ui_layer:
-		ui_layer.add_child(arrival_label)
-	await get_tree().create_timer(1.4).timeout
+	if spawn_transition_active or not is_instance_valid(player):
+		return
+	spawn_transition_active = true
+	player.controls_enabled = false
+	player.set_physics_process(true)
+	if is_instance_valid(camera):
+		camera.make_current()
+	var transition := _create_loading_transition(false)
+	var loading_tween := create_tween()
+	loading_tween.tween_property(transition.bar, "value", 88.0, 3.2).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	await _finish_spawn_transition(transition, loading_tween, 5.0)
+
+func _finish_spawn_transition(transition: Dictionary, loading_tween: Tween = null, minimum_loading_seconds: float = 0.0) -> void:
+	var transition_layer := transition.layer as CanvasLayer
+	if not is_instance_valid(player):
+		if is_instance_valid(transition_layer):
+			transition_layer.queue_free()
+		spawn_transition_active = false
+		return
 	var elapsed := 0.0
-	while is_instance_valid(player) and not player.is_on_floor() and elapsed < 2.0:
+	while is_instance_valid(player) and not player.is_on_floor() and elapsed < 4.0:
 		await get_tree().physics_frame
 		elapsed += 1.0 / Engine.physics_ticks_per_second
 	if not is_instance_valid(player):
+		transition_layer.queue_free()
+		spawn_transition_active = false
 		return
+	if not player.is_on_floor():
+		player.global_position = player.last_safe_position + Vector3.UP * 0.08
+		player.velocity = Vector3.ZERO
+		await get_tree().physics_frame
+	if is_instance_valid(camera):
+		camera.make_current()
 	var visual := player.get_node_or_null("AnimatedCitizen") as Node3D
 	if visual:
 		visual.visible = false
+	player.controls_enabled = false
+	player.velocity = Vector3.ZERO
+	var loading_elapsed := float(Time.get_ticks_msec() - int(transition.started_msec)) / 1000.0
+	if loading_elapsed < minimum_loading_seconds:
+		await get_tree().create_timer(minimum_loading_seconds - loading_elapsed).timeout
+	if loading_tween != null and loading_tween.is_running():
+		loading_tween.kill()
+	(transition.bar as ProgressBar).value = 100.0
+	await get_tree().create_timer(0.22).timeout
+	var radial_shader := Shader.new()
+	radial_shader.code = """
+	shader_type canvas_item;
+	uniform float radius = 0.0;
+	void fragment() {
+		float aspect = SCREEN_PIXEL_SIZE.y / SCREEN_PIXEL_SIZE.x;
+		vec2 centered = (UV - vec2(0.5)) * vec2(aspect, 1.0);
+		float distance_from_center = length(centered);
+		float alpha = smoothstep(radius - 0.006, radius + 0.006, distance_from_center);
+		COLOR = vec4(0.0, 0.0, 0.0, alpha);
+	}
+	"""
+	var radial_material := ShaderMaterial.new()
+	radial_material.shader = radial_shader
+	var viewport_size := get_viewport().get_visible_rect().size
+	var maximum_radius := 0.5 * sqrt(pow(viewport_size.x / maxf(viewport_size.y, 1.0), 2.0) + 1.0) + 0.02
+	radial_material.set_shader_parameter("radius", -0.02)
+	(transition.veil as ColorRect).color = Color.WHITE
+	(transition.veil as ColorRect).material = radial_material
+	(transition.image as TextureRect).visible = false
+	(transition.title as Label).queue_free()
+	(transition.bar as ProgressBar).queue_free()
+	(transition.status as Label).queue_free()
+	(transition.card as PanelContainer).queue_free()
+	var radial_overlay := ColorRect.new()
+	radial_overlay.name = "RadialReveal"
+	radial_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	radial_overlay.color = Color.BLACK
+	radial_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	radial_overlay.material = radial_material
+	transition_layer.add_child(radial_overlay)
+	var opening := create_tween()
+	opening.tween_method(func(radius: float) -> void: radial_material.set_shader_parameter("radius", radius), -0.02, maximum_radius, 0.9).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	await opening.finished
 	player.controls_enabled = true
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	arrival_label.queue_free()
-	camera.make_current()
-	arrival_camera.queue_free()
+	transition_layer.queue_free()
+	spawn_transition_active = false
+	_start_game_ambient_music()
+
+func _setup_game_ambient_music() -> void:
+	var stream := load(GAME_AMBIENT_MUSIC_PATH) as AudioStreamMP3
+	if stream == null:
+		push_warning("No pude cargar la música ambiental del reino.")
+		return
+	stream.loop = true
+	game_ambient_music = AudioStreamPlayer.new()
+	game_ambient_music.name = "GameAmbientMusic"
+	game_ambient_music.stream = stream
+	game_ambient_music.volume_db = -24.0
+	game_ambient_music.bus = "Master"
+	game_ambient_music.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(game_ambient_music)
+
+func _start_game_ambient_music() -> void:
+	if not is_instance_valid(game_ambient_music) or game_ambient_music.playing:
+		return
+	game_ambient_music.volume_db = -34.0
+	game_ambient_music.play()
+	create_tween().tween_property(game_ambient_music, "volume_db", -24.0, 2.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
+func _stop_game_ambient_music() -> void:
+	if is_instance_valid(game_ambient_music):
+		game_ambient_music.stop()
+
+func _setup_water_splash_sound() -> void:
+	var stream := load(WATER_SPLASH_SOUND_PATH) as AudioStreamMP3
+	if stream == null:
+		push_warning("No pude cargar el sonido de caída al agua.")
+		return
+	water_splash_player = AudioStreamPlayer.new()
+	water_splash_player.name = "WaterSplashSound"
+	water_splash_player.stream = stream
+	water_splash_player.volume_db = -10.0
+	water_splash_player.bus = "Master"
+	water_splash_player.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(water_splash_player)
+
+func _play_water_splash_sound() -> void:
+	if not is_instance_valid(water_splash_player):
+		return
+	if water_splash_player.playing:
+		water_splash_player.stop()
+	water_splash_player.play()
+
+func _load_npc_interaction_voice() -> void:
+	npc_interaction_voice_stream = load(NPC_INTERACTION_SOUND_PATH) as AudioStreamMP3
+	if npc_interaction_voice_stream == null:
+		push_warning("No pude cargar el sonido de voz de los NPCs.")
+
+func _play_npc_interaction_voice(npc: Node3D) -> void:
+	if not is_instance_valid(npc) or npc_interaction_voice_stream == null:
+		return
+	var voice := npc.get_node_or_null("NPCInteractionVoice") as AudioStreamPlayer3D
+	if voice == null:
+		voice = AudioStreamPlayer3D.new()
+		voice.name = "NPCInteractionVoice"
+		voice.stream = npc_interaction_voice_stream
+		voice.volume_db = -8.0
+		voice.unit_size = 4.0
+		voice.max_distance = 18.0
+		voice.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+		npc.add_child(voice)
+	if voice.playing:
+		voice.stop()
+	voice.play()
+
+func _play_story_cinematic() -> void:
+	story_cinematic_active = true
+	var cinematic_layer := CanvasLayer.new()
+	cinematic_layer.name = "StoryCinematic"
+	cinematic_layer.layer = 30
+	add_child(cinematic_layer)
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	cinematic_layer.add_child(root)
+	var backdrop := TextureRect.new()
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.texture = load(LOADING_BACKGROUND_PATH) as Texture2D
+	backdrop.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	backdrop.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(backdrop)
+	var veil := ColorRect.new()
+	veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	veil.color = Color(0.015, 0.025, 0.055, 0.74)
+	veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(veil)
+	var story_image := TextureRect.new()
+	story_image.name = "KingdomStoryPanel"
+	story_image.set_anchors_preset(Control.PRESET_CENTER)
+	story_image.offset_left = -560.0
+	story_image.offset_top = -348.0
+	story_image.offset_right = 560.0
+	story_image.offset_bottom = 210.0
+	story_image.texture = STORY_CINEMATIC_PANEL
+	story_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	story_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	story_image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(story_image)
+	var caption_board := PanelContainer.new()
+	caption_board.name = "NarrationCaptionBoard"
+	caption_board.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	caption_board.offset_left = 100.0
+	caption_board.offset_top = -104.0
+	caption_board.offset_right = -100.0
+	caption_board.offset_bottom = -26.0
+	var caption_style := StyleBoxFlat.new()
+	caption_style.bg_color = Color("392317")
+	caption_style.border_color = Color("f3bd4c")
+	caption_style.set_border_width_all(3)
+	caption_style.set_corner_radius_all(18)
+	caption_style.shadow_color = Color(0.02, 0.012, 0.01, 0.8)
+	caption_style.shadow_size = 9
+	caption_style.shadow_offset = Vector2(0, 4)
+	caption_style.content_margin_left = 24.0
+	caption_style.content_margin_right = 24.0
+	caption_style.content_margin_top = 9.0
+	caption_style.content_margin_bottom = 9.0
+	caption_board.add_theme_stylebox_override("panel", caption_style)
+	root.add_child(caption_board)
+	var caption := Label.new()
+	caption.name = "NarrationCaption"
+	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	caption.add_theme_color_override("font_color", Color("fff0bd"))
+	caption.add_theme_color_override("font_shadow_color", Color("29170f"))
+	caption.add_theme_constant_override("shadow_offset_x", 2)
+	caption.add_theme_constant_override("shadow_offset_y", 3)
+	_style_cartoon_text(caption, 21)
+	caption_board.add_child(caption)
+	var narrator := AudioStreamPlayer.new()
+	narrator.name = "StoryNarrator"
+	narrator.volume_db = -2.0
+	add_child(narrator)
+	var fade_in := create_tween()
+	fade_in.tween_property(root, "modulate:a", 1.0, 0.65).from(0.0)
+	for index in range(STORY_NARRATION_PATHS.size()):
+		caption.text = STORY_NARRATION_CAPTIONS[index]
+		var narration := load(STORY_NARRATION_PATHS[index]) as AudioStreamMP3
+		if narration == null:
+			push_warning("No se pudo cargar el fragmento de narración " + str(index + 1))
+			continue
+		narrator.stream = narration
+		narrator.play()
+		await get_tree().create_timer(maxf(narration.get_length(), 0.5), true).timeout
+		narrator.stop()
+		if not is_inside_tree():
+			break
+	await get_tree().create_timer(0.45, true).timeout
+	var fade_out := create_tween()
+	fade_out.tween_property(root, "modulate:a", 0.0, 0.55)
+	await fade_out.finished
+	narrator.queue_free()
+	cinematic_layer.queue_free()
+	story_cinematic_active = false
 
 func _toggle_map_overview() -> void:
 	if overview_camera.current:
@@ -2246,9 +2886,17 @@ func _build_loading_screen() -> void:
 	loading_layer.name = "LoadingScreen"
 	loading_layer.layer = 20
 	add_child(loading_layer)
+	var city_background := TextureRect.new()
+	city_background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	city_background.texture = load(LOADING_BACKGROUND_PATH) as Texture2D
+	city_background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	city_background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	city_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	loading_layer.add_child(city_background)
 	var background := ColorRect.new()
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	background.color = Color("15213a")
+	background.color = Color(0.035, 0.055, 0.09, 0.28)
+	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	loading_layer.add_child(background)
 	var title := Label.new()
 	title.set_anchors_preset(Control.PRESET_CENTER)
@@ -2265,9 +2913,24 @@ func _build_loading_screen() -> void:
 	progress.custom_minimum_size = Vector2(360, 18)
 	progress.value = 65
 	loading_layer.add_child(progress)
+	var reflection := Label.new()
+	reflection.name = "SafetyReflection"
+	reflection.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	reflection.offset_left = 70.0
+	reflection.offset_top = -116.0
+	reflection.offset_right = -70.0
+	reflection.offset_bottom = -30.0
+	reflection.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	reflection.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	reflection.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	reflection.text = "Antes de creer o compartir, verifica. No entregues datos ni dinero a desconocidos y aléjate de retos peligrosos."
+	_style_cartoon_text(reflection, 16)
+	reflection.add_theme_color_override("font_color", Color("fff0bd"))
+	background.add_child(reflection)
 
 func _set_gameplay_ui_visible(visible_now: bool) -> void:
-	if is_instance_valid(gameplay_top_panel): gameplay_top_panel.visible = visible_now
+	_animate_gameplay_status_panel(visible_now)
+	if is_instance_valid(gameplay_role_symbols_row): gameplay_role_symbols_row.visible = visible_now
 	if is_instance_valid(gameplay_bottom_panel): gameplay_bottom_panel.visible = false
 	if is_instance_valid(gameplay_crosshair): gameplay_crosshair.visible = visible_now
 	if is_instance_valid(timer_container): timer_container.visible = visible_now
@@ -2277,12 +2940,58 @@ func _set_gameplay_ui_visible(visible_now: bool) -> void:
 	elif is_instance_valid(prompt): prompt.visible = visible_now
 	if is_instance_valid(panel): panel.visible = false
 	if is_instance_valid(network_panel): network_panel.visible = false
-	if not visible_now and is_instance_valid(whale_puzzle_panel): whale_puzzle_panel.visible = false
+	if not visible_now and is_instance_valid(whale_puzzle_panel):
+		whale_puzzle_panel.visible = false
+		whale_puzzle_dim.visible = false
+
+func _animate_gameplay_status_panel(show_panel: bool) -> void:
+	if not is_instance_valid(gameplay_top_panel):
+		return
+	gameplay_status_requested_visible = show_panel
+	if is_instance_valid(gameplay_top_panel_tween) and gameplay_top_panel_tween.is_running():
+		gameplay_top_panel_tween.kill()
+	var panel_width := maxf(gameplay_top_panel.size.x, gameplay_top_panel.custom_minimum_size.x)
+	var offscreen_position := gameplay_top_panel_home_position - Vector2(panel_width + 44.0, 0.0)
+	if show_panel:
+		gameplay_top_panel.visible = true
+		gameplay_top_panel.position = offscreen_position
+		gameplay_top_panel.modulate.a = 1.0
+		gameplay_top_panel_tween = create_tween()
+		gameplay_top_panel_tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		gameplay_top_panel_tween.tween_property(gameplay_top_panel, "position", gameplay_top_panel_home_position, 0.48)
+		return
+	if not gameplay_top_panel.visible:
+		return
+	gameplay_top_panel_tween = create_tween()
+	gameplay_top_panel_tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	gameplay_top_panel_tween.tween_property(gameplay_top_panel, "position", offscreen_position, 0.34)
+	gameplay_top_panel_tween.tween_callback(func() -> void:
+		if is_instance_valid(gameplay_top_panel) and not gameplay_status_requested_visible:
+			gameplay_top_panel.visible = false
+			gameplay_top_panel.position = gameplay_top_panel_home_position
+	)
 
 func _show_menu_page(page: String) -> void:
 	if not is_instance_valid(menu_root):
 		return
 	menu_root.visible = true
+	if is_instance_valid(player_name_screen):
+		player_name_screen.visible = page == "player_name"
+	if page == "player_name":
+		home_screen.visible = false
+		menu_panel.visible = false
+		if is_instance_valid(player_name_message):
+			player_name_message.text = ""
+		if is_instance_valid(player_name_input):
+			player_name_input.text = network_player_name if network_player_name != "Jugador" else ""
+			player_name_input.grab_focus.call_deferred()
+		if is_instance_valid(leaderboard_overlay):
+			leaderboard_overlay.visible = false
+		return
+	if page == "defeat":
+		_ensure_defeat_background()
+	if is_instance_valid(defeat_background):
+		defeat_background.visible = page == "defeat"
 	if page == "home":
 		home_screen.visible = true
 		menu_panel.visible = false
@@ -2345,7 +3054,7 @@ func _show_menu_page(page: String) -> void:
 	match page:
 		"mode":
 			title.text = "ELIGE EL MODO"
-			_add_menu_button("MODO SOLITARIO", _start_solo_game)
+			_add_menu_button("MODO SOLITARIO", func(): _show_menu_page("player_name"))
 			_add_menu_button("MODO COOPERATIVO", func(): _show_menu_page("coop"))
 			_add_menu_button("VOLVER", func(): _show_menu_page("home"))
 		"coop":
@@ -2464,6 +3173,374 @@ func _show_menu_page(page: String) -> void:
 				ending = "Completaste las misiones y frenaste la desinformación."
 			_add_menu_label(ending, 17)
 			_add_menu_button("VOLVER AL INICIO", _return_to_menu)
+
+func _build_player_name_screen(parent: Control) -> void:
+	player_name_screen = Control.new()
+	player_name_screen.name = "PlayerNameAndTimesScreen"
+	player_name_screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	player_name_screen.visible = false
+	player_name_screen.mouse_filter = Control.MOUSE_FILTER_STOP
+	player_name_screen.z_index = 10
+	parent.add_child(player_name_screen)
+	var background := TextureRect.new()
+	background.name = "NameTimesArtwork"
+	background.texture = PLAYER_NAME_TIMES_SCREEN
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	background.stretch_mode = TextureRect.STRETCH_SCALE
+	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	player_name_screen.add_child(background)
+	player_name_field_cover = ColorRect.new()
+	player_name_field_cover.name = "EditableNameFieldPaper"
+	player_name_field_cover.set_anchors_preset(Control.PRESET_FULL_RECT)
+	player_name_field_cover.anchor_left = 0.219
+	player_name_field_cover.anchor_top = 0.423
+	player_name_field_cover.anchor_right = 0.535
+	player_name_field_cover.anchor_bottom = 0.496
+	player_name_field_cover.color = Color("f2e7d7")
+	player_name_field_cover.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	player_name_field_cover.visible = false
+	player_name_screen.add_child(player_name_field_cover)
+	player_name_placeholder_label = Label.new()
+	player_name_placeholder_label.name = "EditableNamePlaceholder"
+	player_name_placeholder_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	player_name_placeholder_label.anchor_left = 0.219
+	player_name_placeholder_label.anchor_top = 0.423
+	player_name_placeholder_label.anchor_right = 0.535
+	player_name_placeholder_label.anchor_bottom = 0.496
+	player_name_placeholder_label.text = "Escribe tu nombre..."
+	player_name_placeholder_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	player_name_placeholder_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	player_name_placeholder_label.add_theme_color_override("font_color", Color("806751"))
+	player_name_placeholder_label.add_theme_font_size_override("font_size", 29)
+	player_name_placeholder_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	player_name_placeholder_label.visible = false
+	player_name_screen.add_child(player_name_placeholder_label)
+	player_name_input = LineEdit.new()
+	player_name_input.name = "PlayerNameInput"
+	player_name_input.set_anchors_preset(Control.PRESET_FULL_RECT)
+	player_name_input.anchor_left = 0.205
+	player_name_input.anchor_top = 0.407
+	player_name_input.anchor_right = 0.548
+	player_name_input.anchor_bottom = 0.514
+	player_name_input.placeholder_text = ""
+	player_name_input.max_length = 24
+	player_name_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	player_name_input.add_theme_font_override("font", CARTOON_FONT)
+	player_name_input.add_theme_font_size_override("font_size", 26)
+	player_name_input.add_theme_color_override("font_color", Color("58341e"))
+	player_name_input.add_theme_color_override("font_placeholder_color", Color("58341e"))
+	player_name_input.add_theme_color_override("caret_color", Color("85572d"))
+	var empty_style := StyleBoxEmpty.new()
+	player_name_input.add_theme_stylebox_override("normal", empty_style)
+	player_name_input.add_theme_stylebox_override("focus", empty_style)
+	player_name_input.add_theme_stylebox_override("read_only", empty_style)
+	player_name_input.text_changed.connect(func(_value: String) -> void:
+		player_name_field_cover.visible = player_name_input.has_focus() or not player_name_input.text.is_empty()
+		player_name_placeholder_label.visible = player_name_input.has_focus() and player_name_input.text.is_empty()
+		if is_instance_valid(player_name_message):
+			player_name_message.text = ""
+	)
+	player_name_input.focus_entered.connect(func() -> void:
+		player_name_field_cover.visible = true
+		player_name_placeholder_label.visible = player_name_input.text.is_empty()
+	)
+	player_name_input.focus_exited.connect(func() -> void:
+		player_name_field_cover.visible = not player_name_input.text.is_empty()
+		player_name_placeholder_label.visible = false
+	)
+	player_name_input.text_submitted.connect(func(_value: String) -> void: _confirm_player_name())
+	player_name_screen.add_child(player_name_input)
+	player_name_message = Label.new()
+	player_name_message.name = "NameValidationMessage"
+	player_name_message.set_anchors_preset(Control.PRESET_FULL_RECT)
+	player_name_message.anchor_left = 0.205
+	player_name_message.anchor_top = 0.513
+	player_name_message.anchor_right = 0.548
+	player_name_message.anchor_bottom = 0.55
+	player_name_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	player_name_message.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	player_name_message.add_theme_font_override("font", CARTOON_FONT)
+	player_name_message.add_theme_font_size_override("font_size", 18)
+	player_name_message.add_theme_color_override("font_color", Color("7c2d1e"))
+	player_name_screen.add_child(player_name_message)
+	var continue_button := _create_transparent_screen_button("ContinueButton", Rect2(0.20, 0.55, 0.35, 0.14))
+	continue_button.pressed.connect(_confirm_player_name)
+	player_name_screen.add_child(continue_button)
+	var table_button := _create_transparent_screen_button("TableButton", Rect2(0.277, 0.715, 0.201, 0.085))
+	table_button.pressed.connect(func() -> void:
+		_refresh_player_leaderboard()
+		player_name_message.text = "Tabla de tiempos actualizada."
+	)
+	player_name_screen.add_child(table_button)
+	# Keep the existing co-op flow available as a discreet link below the time board.
+	var coop_button := Button.new()
+	coop_button.name = "CoopModeLink"
+	coop_button.set_anchors_preset(Control.PRESET_FULL_RECT)
+	coop_button.anchor_left = 0.705
+	coop_button.anchor_top = 0.865
+	coop_button.anchor_right = 0.96
+	coop_button.anchor_bottom = 0.94
+	coop_button.text = "MODO COOPERATIVO"
+	coop_button.add_theme_font_override("font", CARTOON_FONT)
+	coop_button.add_theme_font_size_override("font_size", 17)
+	coop_button.add_theme_color_override("font_color", Color("fff0bd"))
+	coop_button.add_theme_color_override("font_outline_color", Color("57321d"))
+	coop_button.add_theme_constant_override("outline_size", 3)
+	coop_button.flat = true
+	coop_button.pressed.connect(func() -> void: _show_menu_page("coop"))
+	player_name_screen.add_child(coop_button)
+	_build_inline_leaderboard()
+	_refresh_player_leaderboard()
+
+func _build_inline_leaderboard() -> void:
+	# Cover only the sample rows printed in the reference art, then draw the saved times here.
+	var paper := ColorRect.new()
+	paper.name = "LeaderboardRowsPaper"
+	paper.set_anchors_preset(Control.PRESET_FULL_RECT)
+	paper.anchor_left = 0.682
+	paper.anchor_top = 0.354
+	paper.anchor_right = 0.902
+	paper.anchor_bottom = 0.696
+	paper.color = Color("edd7a9")
+	paper.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	player_name_screen.add_child(paper)
+	var records_heading := Label.new()
+	records_heading.name = "SavedRecordsHeading"
+	records_heading.set_anchors_preset(Control.PRESET_FULL_RECT)
+	records_heading.anchor_left = 0.682
+	records_heading.anchor_top = 0.354
+	records_heading.anchor_right = 0.902
+	records_heading.anchor_bottom = 0.414
+	records_heading.text = "MEJORES PARTIDAS · RÉCORDS"
+	records_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	records_heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	records_heading.add_theme_font_size_override("font_size", 15)
+	records_heading.add_theme_color_override("font_color", Color("58341e"))
+	records_heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	player_name_screen.add_child(records_heading)
+	leaderboard_rows = VBoxContainer.new()
+	leaderboard_rows.name = "SavedLeaderboardRows"
+	leaderboard_rows.set_anchors_preset(Control.PRESET_FULL_RECT)
+	leaderboard_rows.anchor_left = 0.682
+	leaderboard_rows.anchor_top = 0.421
+	leaderboard_rows.anchor_right = 0.902
+	leaderboard_rows.anchor_bottom = 0.696
+	leaderboard_rows.add_theme_constant_override("separation", 6)
+	leaderboard_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	player_name_screen.add_child(leaderboard_rows)
+
+func _create_transparent_screen_button(button_name: String, normalized_rect: Rect2) -> Button:
+	var button := Button.new()
+	button.name = button_name
+	button.set_anchors_preset(Control.PRESET_FULL_RECT)
+	button.anchor_left = normalized_rect.position.x
+	button.anchor_top = normalized_rect.position.y
+	button.anchor_right = normalized_rect.position.x + normalized_rect.size.x
+	button.anchor_bottom = normalized_rect.position.y + normalized_rect.size.y
+	button.text = ""
+	button.focus_mode = Control.FOCUS_NONE
+	for style_name in ["normal", "hover", "pressed", "focus", "disabled"]:
+		button.add_theme_stylebox_override(style_name, StyleBoxEmpty.new())
+	return button
+
+func _create_player_leaderboard_overlay() -> void:
+	leaderboard_overlay = Control.new()
+	leaderboard_overlay.name = "PlayerLeaderboardOverlay"
+	leaderboard_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	leaderboard_overlay.visible = false
+	leaderboard_overlay.z_index = 20
+	player_name_screen.add_child(leaderboard_overlay)
+	var shade := ColorRect.new()
+	shade.name = "LeaderboardShade"
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	shade.color = Color(0.055, 0.035, 0.025, 0.76)
+	shade.mouse_filter = Control.MOUSE_FILTER_STOP
+	leaderboard_overlay.add_child(shade)
+	var board := PanelContainer.new()
+	board.name = "LeaderboardBoard"
+	board.set_anchors_preset(Control.PRESET_CENTER)
+	board.offset_left = -330
+	board.offset_top = -282
+	board.offset_right = 330
+	board.offset_bottom = 282
+	_style_texture_board(board, Rect2(18, 0, 980, 770), Vector2(660, 564), Vector4(86, 86, 82, 74))
+	leaderboard_overlay.add_child(board)
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 12)
+	board.add_child(content)
+	var title := Label.new()
+	title.text = "TABLA DE TIEMPOS"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_cartoon_text(title, 30)
+	title.add_theme_color_override("font_color", Color("fff0bd"))
+	content.add_child(title)
+	var subtitle := Label.new()
+	subtitle.text = "PARTIDAS COMPLETADAS · MÁS RÁPIDAS PRIMERO"
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_style_cartoon_text(subtitle, 16)
+	subtitle.add_theme_color_override("font_color", Color("6f4528"))
+	content.add_child(subtitle)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size = Vector2(0, 350)
+	content.add_child(scroll)
+	leaderboard_rows = VBoxContainer.new()
+	leaderboard_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	leaderboard_rows.add_theme_constant_override("separation", 8)
+	scroll.add_child(leaderboard_rows)
+	var close_button := Button.new()
+	close_button.text = "VOLVER"
+	close_button.custom_minimum_size = Vector2(220, 48)
+	close_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_style_cartoon_text(close_button, 20)
+	_style_wood_button(close_button)
+	close_button.pressed.connect(func() -> void: leaderboard_overlay.visible = false)
+	content.add_child(close_button)
+
+func _show_player_leaderboard() -> void:
+	if player_name_input.text.strip_edges().is_empty():
+		player_name_message.text = "Escribe tu nombre para consultar la tabla."
+		return
+	_refresh_player_leaderboard()
+	leaderboard_overlay.visible = true
+
+func _refresh_player_leaderboard() -> void:
+	if not is_instance_valid(leaderboard_rows):
+		return
+	for child in leaderboard_rows.get_children():
+		leaderboard_rows.remove_child(child)
+		child.queue_free()
+	if leaderboard_records.is_empty():
+		var empty_label := Label.new()
+		empty_label.text = "Aún no hay partidas completadas.\nCompleta una partida para guardar tu tiempo."
+		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		empty_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		empty_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		empty_label.custom_minimum_size = Vector2(0, 100)
+		_style_plain_player_record_text(empty_label, 17)
+		empty_label.add_theme_color_override("font_color", Color("58341e"))
+		leaderboard_rows.add_child(empty_label)
+		return
+	for index in range(mini(4, leaderboard_records.size())):
+		var record: Dictionary = leaderboard_records[index]
+		var row := PanelContainer.new()
+		var row_style := StyleBoxFlat.new()
+		row_style.bg_color = Color("f4e1b6")
+		row_style.border_color = Color("c18a35")
+		row_style.set_border_width_all(2)
+		row_style.set_corner_radius_all(10)
+		row_style.content_margin_left = 16
+		row_style.content_margin_right = 16
+		row_style.content_margin_top = 4
+		row_style.content_margin_bottom = 4
+		row.add_theme_stylebox_override("panel", row_style)
+		var row_content := HBoxContainer.new()
+		row_content.add_theme_constant_override("separation", 14)
+		var rank := Label.new()
+		rank.text = "%02d" % (index + 1)
+		rank.custom_minimum_size = Vector2(38, 32)
+		rank.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		_style_plain_player_record_text(rank, 18)
+		rank.add_theme_color_override("font_color", Color("9a5b1d"))
+		row_content.add_child(rank)
+		var player_label := Label.new()
+		player_label.text = String(record.get("name", "Jugador"))
+		player_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		player_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		player_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		_style_plain_player_record_text(player_label, 18)
+		player_label.add_theme_color_override("font_color", Color("58341e"))
+		row_content.add_child(player_label)
+		var time_label := Label.new()
+		time_label.text = _format_player_time(int(record.get("seconds", 0)))
+		time_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		_style_plain_player_record_text(time_label, 18)
+		time_label.add_theme_color_override("font_color", Color("58341e"))
+		row_content.add_child(time_label)
+		row.add_child(row_content)
+		leaderboard_rows.add_child(row)
+
+func _confirm_player_name() -> void:
+	if not is_instance_valid(player_name_input):
+		return
+	var clean_name := player_name_input.text.strip_edges()
+	if clean_name.is_empty():
+		player_name_message.text = "Escribe tu nombre para continuar."
+		player_name_input.grab_focus()
+		return
+	if clean_name.length() > 24:
+		clean_name = clean_name.substr(0, 24)
+	network_player_name = clean_name
+	if is_instance_valid(player_name_message):
+		player_name_message.text = ""
+	_start_solo_game()
+
+func _load_player_completion_times() -> void:
+	leaderboard_records.clear()
+	var config := ConfigFile.new()
+	if config.load(PLAYER_RECORDS_PATH) != OK:
+		return
+	var saved_records: Array = config.get_value("leaderboard", "records", [])
+	for record_value in saved_records:
+		if not record_value is Dictionary:
+			continue
+		var record: Dictionary = record_value
+		var clean_name := String(record.get("name", "")).strip_edges()
+		if clean_name.is_empty():
+			continue
+		leaderboard_records.append({"name":clean_name, "seconds":maxi(1, int(record.get("seconds", 0)))})
+	leaderboard_records.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return int(a.get("seconds", 0)) < int(b.get("seconds", 0))
+	)
+
+func _record_player_completion_time() -> void:
+	if completion_recorded_for_match:
+		return
+	completion_recorded_for_match = true
+	var clean_name := network_player_name.strip_edges()
+	if clean_name.is_empty():
+		clean_name = "Jugador"
+	leaderboard_records.append({"name":clean_name, "seconds":maxi(1, roundi(match_elapsed_seconds))})
+	leaderboard_records.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return int(a.get("seconds", 0)) < int(b.get("seconds", 0))
+	)
+	while leaderboard_records.size() > 50:
+		leaderboard_records.pop_back()
+	var config := ConfigFile.new()
+	config.set_value("leaderboard", "records", leaderboard_records)
+	var error := config.save(PLAYER_RECORDS_PATH)
+	if error != OK:
+		push_warning("No pude guardar los tiempos de las partidas completadas.")
+
+func _format_player_time(total_seconds: int) -> String:
+	var safe_seconds := maxi(0, total_seconds)
+	return "%02d:%02d" % [safe_seconds / 60, safe_seconds % 60]
+
+func _style_plain_player_record_text(label: Control, font_size: int) -> void:
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0))
+	label.add_theme_constant_override("shadow_offset_x", 0)
+	label.add_theme_constant_override("shadow_offset_y", 0)
+
+func _ensure_defeat_background() -> void:
+	if is_instance_valid(defeat_background):
+		return
+	defeat_background = TextureRect.new()
+	defeat_background.name = "DefeatKingdomBackground"
+	defeat_background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	defeat_background.texture = DEFEAT_BACKGROUND
+	defeat_background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	defeat_background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	defeat_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var darken := ColorRect.new()
+	darken.name = "DefeatBackgroundShade"
+	darken.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	darken.color = Color(0.025, 0.04, 0.07, 0.34)
+	darken.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	defeat_background.add_child(darken)
+	menu_root.add_child(defeat_background)
+	menu_root.move_child(defeat_background, mini(2, menu_root.get_child_count() - 1))
 
 func _add_menu_label(message: String, size: int) -> void:
 	var label := Label.new()
@@ -2850,6 +3927,7 @@ func _join_room_code() -> void:
 		_show_menu_page("waiting")
 
 func _cancel_room() -> void:
+	_stop_game_ambient_music()
 	multiplayer.multiplayer_peer = null
 	is_solo_mode = true
 	is_network_host = false
@@ -2934,6 +4012,7 @@ func _reset_match_state() -> void:
 	fraud_guard7_suspicion_stage = 0
 	fraud_wrong_suspicions = 0
 	fraud_owner_peer_id = 0
+	_reset_revolutionary_rescue()
 	fraud_guard6_concern_played = false
 	guardian8_mission_completed = false
 	guardian8_owner_peer_id = 0
@@ -2950,12 +4029,19 @@ func _reset_match_state() -> void:
 	npc_greeted.clear()
 	final_classification_summary = ""
 	answered = 0
-	roulette_used = false
+	match_elapsed_seconds = 0.0
+	completion_recorded_for_match = false
+	roulette_role_uses.clear()
+	roulette_spinning_wheels.clear()
 	game_time_remaining = GAME_DURATION_SECONDS
 	game_timer_timeout = false
 	npc_mood_duration = NPC_MOOD_DURATION
 	speed_boost_time = 0.0
+	slow_time = 0.0
+	double_jump_disabled_time = 0.0
 	if is_instance_valid(player):
+		player.set("max_air_jumps", 1)
+		player.set("air_jumps_left", 1)
 		player.set("speed", 6.0)
 	for chest_info in info_chests:
 		_close_chest_visual(chest_info.node as Node3D)
@@ -2977,6 +4063,13 @@ func _launch_game() -> void:
 	if gameplay_started:
 		return
 	gameplay_started = true
+	game_running = false
+	if is_instance_valid(menu_root):
+		menu_root.visible = false
+	_set_gameplay_ui_visible(false)
+	await _play_story_cinematic()
+	if not is_inside_tree():
+		return
 	game_running = true
 	game_timer_timeout = false
 	_start_guardia_08_hop()
@@ -2998,6 +4091,7 @@ func _launch_game() -> void:
 	_start_spawn_intro()
 
 func _return_to_menu() -> void:
+	_stop_game_ambient_music()
 	game_running = false
 	gameplay_started = false
 	player.controls_enabled = false
@@ -3081,6 +4175,9 @@ func _receive_restart_match() -> void:
 	_perform_restart_match()
 
 func _end_game(won: bool, defeat_cause: String = "timeout") -> void:
+	if won:
+		_record_player_completion_time()
+	_stop_game_ambient_music()
 	game_running = false
 	if not won:
 		last_defeat_cause = defeat_cause
@@ -3110,8 +4207,9 @@ func _check_game_completion() -> void:
 func _update_timer_hud() -> void:
 	if time_progress == null:
 		return
+	time_progress.max_value = maxf(GAME_DURATION_SECONDS, game_time_remaining)
 	time_progress.value = game_time_remaining
-	var progress_ratio := game_time_remaining / GAME_DURATION_SECONDS
+	var progress_ratio := game_time_remaining / time_progress.max_value
 	var total_seconds := ceili(game_time_remaining)
 	time_label.text = "%02d:%02d" % [total_seconds / 60, total_seconds % 60]
 	var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 160.0)
@@ -3128,7 +4226,7 @@ func _build_ui() -> void:
 	var top := PanelContainer.new()
 	top.name = "GameplayStatus"
 	gameplay_top_panel = top
-	top.position = Vector2(22, 18)
+	top.position = gameplay_top_panel_home_position
 	top.custom_minimum_size = Vector2(420, 240)
 	_style_atlas_panel(top, Vector2(420, 240))
 	var mission_card := Control.new()
@@ -3175,6 +4273,13 @@ func _build_ui() -> void:
 	mission_card.add_child(top_content)
 	top.add_child(mission_card)
 	layer.add_child(top)
+	gameplay_role_symbols_row = HBoxContainer.new()
+	gameplay_role_symbols_row.name = "AssignedRoleSymbols"
+	gameplay_role_symbols_row.position = gameplay_role_symbols_home_position
+	gameplay_role_symbols_row.add_theme_constant_override("separation", 8)
+	gameplay_role_symbols_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gameplay_role_symbols_row.visible = false
+	layer.add_child(gameplay_role_symbols_row)
 	var bottom := PanelContainer.new()
 	gameplay_bottom_panel = bottom
 	bottom.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
@@ -3208,37 +4313,97 @@ func _build_ui() -> void:
 	prompt_panel = PanelContainer.new()
 	prompt_panel.name = "InteractionPlaque"
 	prompt_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	prompt_panel.offset_left = -370
-	prompt_panel.offset_top = -104
-	prompt_panel.offset_right = 370
-	prompt_panel.offset_bottom = -48
-	_style_wood_panel(prompt_panel, Color("432a1d"), Vector2(740, 56))
-	prompt.custom_minimum_size = Vector2(700, 34)
-	prompt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	prompt.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_style_cartoon_text(prompt, 22)
-	prompt.add_theme_color_override("font_color", Color("fff0d0"))
-	prompt_panel.add_child(prompt)
+	_style_texture_board(prompt_panel, Rect2(985, 230, 1015, 280), Vector2.ZERO, Vector4(54, 54, 22, 22))
+	prompt.custom_minimum_size = Vector2.ZERO
+	prompt.visible = false # Keep the original interaction text as the state source.
+	var prompt_row := HBoxContainer.new()
+	prompt_row.name = "InteractionPlaqueContent"
+	prompt_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	prompt_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	prompt_row.add_theme_constant_override("separation", 14)
+	var keycap_panel := PanelContainer.new()
+	keycap_panel.name = "ActionKeycapFrame"
+	keycap_panel.custom_minimum_size = Vector2(62, 56)
+	keycap_panel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	keycap_panel.add_theme_stylebox_override("panel", _dialogue_keycap_style())
+	prompt_keycap_label = Label.new()
+	prompt_keycap_label.name = "ActionKeycap"
+	prompt_keycap_label.custom_minimum_size = Vector2(52, 48)
+	prompt_keycap_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	prompt_keycap_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_style_cartoon_text(prompt_keycap_label, 22)
+	prompt_keycap_label.add_theme_color_override("font_color", Color("fff0d0"))
+	keycap_panel.add_child(prompt_keycap_label)
+	prompt_row.add_child(keycap_panel)
+	prompt_action_label = Label.new()
+	prompt_action_label.name = "ActionText"
+	prompt_action_label.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	prompt_action_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	prompt_action_label.custom_minimum_size = Vector2(190, 60)
+	prompt_action_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	prompt_action_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	prompt_action_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_style_cartoon_text(prompt_action_label, 19)
+	prompt_action_label.add_theme_color_override("font_color", Color("fff0d0"))
+	prompt_row.add_child(prompt_action_label)
+	prompt_panel.add_child(prompt_row)
 	layer.add_child(prompt_panel)
 	panel = PanelContainer.new()
-	panel.set_anchors_preset(Control.PRESET_CENTER)
-	panel.position = Vector2(-300, -205)
-	panel.custom_minimum_size = Vector2(600, 410)
+	panel.name = "DialogueNoticeBoard"
+	panel.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	panel.custom_minimum_size = Vector2.ZERO
 	panel.visible = false
-	_style_wood_panel(panel, Color("432a1d"), Vector2(600, 410))
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 26)
-	margin.add_theme_constant_override("margin_right", 26)
-	margin.add_theme_constant_override("margin_top", 20)
-	margin.add_theme_constant_override("margin_bottom", 20)
+	_style_texture_board(panel, Rect2(18, 0, 980, 770), Vector2.ZERO, Vector4(86, 86, 105, 70))
+	var dialogue_content := VBoxContainer.new()
+	dialogue_content.name = "DialogueContent"
+	dialogue_content.add_theme_constant_override("separation", 12)
+	var title_row := HBoxContainer.new()
+	title_row.name = "DialogueTitleRow"
+	title_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	dialogue_title_holder = Control.new()
+	dialogue_title_holder.name = "DialogueTitleHolder"
+	dialogue_title_holder.custom_minimum_size = Vector2(0, 72)
+	dialogue_title_holder.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	dialogue_title_plaque = PanelContainer.new()
+	dialogue_title_plaque.name = "DialogueTitlePlaque"
+	dialogue_title_plaque.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	dialogue_title_plaque.custom_minimum_size = Vector2(0, 52)
+	dialogue_title_plaque.add_theme_stylebox_override("panel", _dialogue_title_style())
+	dialogue_title_label = Label.new()
+	dialogue_title_label.name = "DialogueTitle"
+	dialogue_title_label.custom_minimum_size = Vector2(0, 40)
+	dialogue_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dialogue_title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_style_cartoon_text(dialogue_title_label, 24)
+	dialogue_title_label.add_theme_color_override("font_color", Color("fff0bd"))
+	dialogue_title_plaque.add_child(dialogue_title_label)
+	dialogue_title_holder.add_child(dialogue_title_plaque)
+	title_row.add_child(dialogue_title_holder)
+	dialogue_content.add_child(title_row)
+	var dialogue_body_wrap := MarginContainer.new()
+	dialogue_body_wrap.name = "DialogueBodyArea"
+	dialogue_body_wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	dialogue_body_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dialogue_body_label = Label.new()
+	dialogue_body_label.name = "DialogueBody"
+	dialogue_body_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dialogue_body_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	dialogue_body_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dialogue_body_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_style_cartoon_text(dialogue_body_label, 22)
+	dialogue_body_label.add_theme_color_override("font_color", Color("fff4d7"))
+	dialogue_body_label.add_theme_color_override("font_shadow_color", Color("51301a"))
+	dialogue_body_label.add_theme_constant_override("shadow_offset_x", 1)
+	dialogue_body_label.add_theme_constant_override("shadow_offset_y", 2)
+	dialogue_body_wrap.add_child(dialogue_body_label)
+	dialogue_content.add_child(dialogue_body_wrap)
 	panel_text = Label.new()
-	panel_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_style_cartoon_text(panel_text, 23)
-	panel_text.add_theme_color_override("font_color", Color("fff0d0"))
-	margin.add_child(panel_text)
-	panel.add_child(margin)
+	panel_text.visible = false
+	panel.add_child(dialogue_content)
 	layer.add_child(panel)
+	get_viewport().size_changed.connect(_layout_dialogue_board)
+	_layout_dialogue_board()
 	_build_whale_puzzle_ui(layer)
 	network_panel = PanelContainer.new()
 	network_panel.set_anchors_preset(Control.PRESET_CENTER)
@@ -3360,7 +4525,8 @@ func _build_ui() -> void:
 	layer.add_child(background_root)
 	menu_root = background_root
 	home_screen = background_root.get_node("HomeScreen") as Control
-	background_root.connect("play_requested", func(): _show_menu_page("mode"))
+	_build_player_name_screen(background_root)
+	background_root.connect("play_requested", func(): _show_menu_page("player_name"))
 	background_root.connect("tutorial_requested", func(): _show_menu_page("tutorial"))
 	background_root.connect("settings_requested", func(): _show_menu_page("settings"))
 	menu_panel = PanelContainer.new()
@@ -3387,16 +4553,22 @@ func _build_ui() -> void:
 	background_root.add_child(menu_panel)
 	restart_button = Button.new()
 	restart_button.name = "RestartMatchButton"
-	restart_button.text = "REINICIAR"
+	restart_button.text = ""
+	restart_button.tooltip_text = "Reiniciar partida"
 	restart_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	restart_button.offset_left = -196
-	restart_button.offset_top = -62
-	restart_button.offset_right = -20
-	restart_button.offset_bottom = -16
-	restart_button.custom_minimum_size = Vector2(176, 46)
+	restart_button.offset_left = -154
+	restart_button.offset_top = -130
+	restart_button.offset_right = -18
+	restart_button.offset_bottom = -18
+	restart_button.custom_minimum_size = Vector2(136, 112)
 	restart_button.focus_mode = Control.FOCUS_ALL
-	_style_cartoon_text(restart_button, 18)
-	_style_wood_button(restart_button)
+	restart_button.pivot_offset = restart_button.custom_minimum_size * 0.5
+	_style_cartoon_text(restart_button, 24)
+	_style_restart_button(restart_button)
+	restart_button.mouse_entered.connect(func() -> void: _animate_restart_button(true))
+	restart_button.mouse_exited.connect(func() -> void: _animate_restart_button(false))
+	restart_button.button_down.connect(func() -> void: _press_restart_button(true))
+	restart_button.button_up.connect(func() -> void: _press_restart_button(false))
 	restart_button.pressed.connect(_show_restart_confirmation)
 	layer.add_child(restart_button)
 	restart_confirmation_root = Control.new()
@@ -3491,16 +4663,77 @@ func _update_role_ui() -> void:
 		return
 	solo_role_button.visible = local_roles.size() > 1
 	solo_role_button.disabled = local_roles.size() < 2
-	if is_solo_mode:
-		solo_role_button.text = "Rol: %s" % _role_display_name(active_role)
-	else:
-		var shown_roles: Array[String] = []
-		for role in local_roles:
-			shown_roles.append(_role_display_name(String(role)))
-		solo_role_button.text = "Roles: %s  ·  Activo: %s" % [", ".join(PackedStringArray(shown_roles)), _role_display_name(active_role)]
+	solo_role_button.text = "MISIONES"
+	_update_role_symbols()
 	if network_button != null:
 		network_button.text = "Red: %d jugador(es)" % maxi(1, network_peer_ids.size())
 	_apply_role_hud_color()
+
+func _update_role_symbols() -> void:
+	if not is_instance_valid(gameplay_role_symbols_row):
+		return
+	for child in gameplay_role_symbols_row.get_children():
+		gameplay_role_symbols_row.remove_child(child)
+		child.queue_free()
+	var role := active_role
+	var tile := Control.new()
+	tile.name = "RoleSymbol_" + role.replace(" ", "_")
+	tile.custom_minimum_size = Vector2(116, 116)
+	tile.tooltip_text = _role_display_name(role)
+	var medallion := TextureRect.new()
+	medallion.name = "MedallionFrame"
+	medallion.texture = ROLE_SYMBOL_MEDALLION
+	medallion.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	medallion.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	medallion.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	medallion.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tile.add_child(medallion)
+	var symbol := TextureRect.new()
+	symbol.name = "Symbol"
+	var atlas_region := AtlasTexture.new()
+	atlas_region.atlas = ROLE_SYMBOLS_ATLAS
+	atlas_region.region = _role_symbol_region(role)
+	symbol.texture = atlas_region
+	symbol.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	symbol.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	symbol.position = Vector2(23, 22)
+	symbol.size = Vector2(70, 72)
+	symbol.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tile.add_child(symbol)
+	gameplay_role_symbols_row.add_child(tile)
+	var name_plate := PanelContainer.new()
+	name_plate.name = "ActiveRoleNamePlate"
+	name_plate.custom_minimum_size = Vector2(260, 72)
+	name_plate.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	name_plate.tooltip_text = "Rol activo"
+	var name_style := StyleBoxTexture.new()
+	name_style.texture = _game_ui_atlas_region(Rect2(20, 15, 820, 220))
+	name_style.content_margin_left = 18
+	name_style.content_margin_right = 18
+	name_style.content_margin_top = 12
+	name_style.content_margin_bottom = 0
+	name_plate.add_theme_stylebox_override("panel", name_style)
+	var name_label := Label.new()
+	name_label.name = "ActiveRoleName"
+	name_label.text = _role_display_name(role).to_upper()
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	name_label.custom_minimum_size = Vector2(228, 48)
+	_style_cartoon_text(name_label, 24)
+	name_label.add_theme_color_override("font_color", Color("fff0bd"))
+	name_label.add_theme_color_override("font_shadow_color", Color("2b170d"))
+	name_label.add_theme_constant_override("shadow_offset_x", 2)
+	name_label.add_theme_constant_override("shadow_offset_y", 3)
+	name_plate.add_child(name_label)
+	gameplay_role_symbols_row.add_child(name_plate)
+
+func _role_symbol_region(role: String) -> Rect2:
+	match role:
+		"Ciudadano": return Rect2(72, 0, 568, 572) # Héroe · escudo
+		"Periodista": return Rect2(666, 0, 646, 558) # Mensajero · carta
+		"Influencer": return Rect2(90, 552, 570, 647) # Bardo · laúd
+		"Candidato a alcalde": return Rect2(680, 552, 632, 647) # Revolucionario · estandarte
+		_: return Rect2(72, 0, 568, 572)
 
 func _role_accent_color(role: String) -> Color:
 	match role:
@@ -3573,6 +4806,10 @@ func _role_mission(role: String) -> String:
 			if not influencer_has_information: return "Espera la información del Mensajero"
 			return "Difunde datos verificados: %d/%d" % [influencer_delivery_cursor, influencer_delivery_queue.size()]
 		"Candidato a alcalde":
+			if not revolutionary_rescue_completed:
+				if revolutionary_rescue_has_knife: return "Lleva el cuchillo con Guardia 9 y pulsa Q para liberarlo"
+				if revolutionary_rescue_started: return "Recoge el cuchillo y vuelve con Guardia 9"
+				return "Habla con Guardia 9 y busca algo filoso"
 			if not guardian8_mission_completed:
 				return "Intervén con Guardia 8: completa el rompecabezas" if guardian8_owner_peer_id == 0 or _is_guardian8_event_owner() else "Guardia 8: otro jugador se encarga"
 			return "Anima a vecinos: %d/%d" % [cheered_npcs.size(), npc_targets.size()]
@@ -3848,12 +5085,20 @@ func _broadcast_coop_state() -> void:
 		"fraud_guard6_concern_played": fraud_guard6_concern_played,
 		"guardian8_mission_completed": guardian8_mission_completed,
 		"guardian8_owner_peer_id": guardian8_owner_peer_id,
-		"game_time_remaining": game_time_remaining
+		"game_time_remaining": game_time_remaining,
+		"roulette_role_uses": roulette_role_uses
 	}
 	rpc("_receive_coop_state", state)
 
 @rpc("any_peer", "call_remote", "reliable")
 func _receive_coop_state(state: Dictionary) -> void:
+	var shared_roulette_uses: Dictionary = state.get("roulette_role_uses", {})
+	for wheel_id in shared_roulette_uses:
+		var local_uses: Dictionary = roulette_role_uses.get(String(wheel_id), {})
+		var incoming_uses: Dictionary = shared_roulette_uses[wheel_id]
+		for role_name in incoming_uses:
+			local_uses[String(role_name)] = true
+		roulette_role_uses[String(wheel_id)] = local_uses
 	for key in (state.get("collected", {}) as Dictionary):
 		if not collected_info.has(key):
 			collected_info[key] = state.collected[key]
@@ -3908,6 +5153,8 @@ func _receive_coop_state(state: Dictionary) -> void:
 			player.controls_enabled = true
 		if is_instance_valid(whale_puzzle_panel):
 			whale_puzzle_panel.visible = false
+		if is_instance_valid(whale_puzzle_dim):
+			whale_puzzle_dim.visible = false
 		if guardian8 != null and is_instance_valid(guardian8):
 			guardian8.global_position = guardian8_home_position
 	game_time_remaining = minf(game_time_remaining, float(state.get("game_time_remaining", game_time_remaining)))
@@ -3945,13 +5192,17 @@ func _exit_network_game() -> void:
 	_update_information_hud()
 
 func _update_nearest_station() -> void:
+	for npc_state in npc_targets:
+		var old_badge := npc_state.get("interaction_badge") as Node3D
+		if is_instance_valid(old_badge):
+			old_badge.visible = false
 	if whale_puzzle_active:
 		prompt.text = "Flechas · mover  |  MAYÚS / BLOQ MAYÚS · girar 90°  |  ESPACIO · tomar/dejar"
-		prompt_panel.visible = true
+		prompt_panel.visible = false
 		return
 	if panel != null and panel.visible:
 		if guardian8_dialogue_pending:
-			prompt.text = "ESPACIO  ·  Abrir rompecabezas"
+			prompt.text = "ESPACIO  ·  Pulsa para abrir el rompecabezas"
 		else:
 			prompt.text = "Q  ·  Cerrar" if panel_uses_q else "E  ·  Cerrar"
 		prompt_panel.visible = true
@@ -3971,6 +5222,17 @@ func _update_nearest_station() -> void:
 				prompt.text = "Otro jugador está acompañando a Guardia 8"
 			else:
 				prompt.text = "Q · Hablar con Guardia 8 desde el bloque cercano"
+		"revolutionary_knife":
+			prompt.text = "E · Mirar el cuchillo" if not revolutionary_rescue_started else "E · Recoger el cuchillo"
+		"revolutionary_guard":
+			if revolutionary_rescue_animation_active:
+				prompt.text = "Guardia 9 se está poniendo de pie…"
+			elif revolutionary_rescue_has_knife:
+				prompt.text = "Q · Cortar las cuerdas y ayudar a Guardia 9"
+			elif revolutionary_rescue_started:
+				prompt.text = "Guardia 9 espera el cuchillo · vuelve a hablar con Q"
+			else:
+				prompt.text = "Q · Hablar con Guardia 9"
 		"fraud_npc":
 			prompt.text = _fraud_prompt(String(target.guard_name))
 		"chest":
@@ -4026,7 +5288,14 @@ func _update_nearest_station() -> void:
 				prompt.text = "Completa las entrevistas: %d/%d" % [interviewed_npcs.size(), npc_targets.size()]
 			else:
 				prompt.text = "E  ·  Resolver puzles y verificar la información"
-		"roulette": prompt.text = "Ruleta usada esta partida" if roulette_used else "E  ·  Girar ruleta (una vez por partida)"
+		"roulette":
+			var wheel_id := String(target.get("roulette_id", "rotate-z2"))
+			if bool(roulette_spinning_wheels.get(wheel_id, false)):
+				prompt.text = "La ruleta está girando…"
+			elif _roulette_role_used(wheel_id, active_role):
+				prompt.text = "Ya usaste esta ruleta con el rol " + active_role
+			else:
+				prompt.text = "E  ·  Girar la ruleta con " + active_role
 		"npc":
 			var state: Dictionary = npc_targets[int(target.npc_index)]
 			var mood_percent := roundi(float(state.mood) * 100.0)
@@ -4054,7 +5323,24 @@ func _update_nearest_station() -> void:
 							prompt.text = "Entrega primero al siguiente vecino"
 					"Candidato a alcalde": prompt.text = "Ánimo recargando · %d%%" % mood_percent if state.recharging else "E  ·  Animar a " + String(target.name) + "  ·  Ánimo %d%%" % mood_percent
 					_: prompt.text = "E  ·  Conversar con " + String(target.name).replace("_", " ")
-	prompt_panel.visible = not prompt.text.is_empty()
+	var show_npc_interaction_badge := String(target.kind) == "npc" and (prompt.text.begins_with("E  ·") or prompt.text.begins_with("Mantén E"))
+	if show_npc_interaction_badge:
+		var npc_index := int(target.npc_index)
+		if npc_index >= 0 and npc_index < npc_targets.size():
+			var state: Dictionary = npc_targets[npc_index]
+			var badge := state.get("interaction_badge") as Node3D
+			if is_instance_valid(badge):
+				_set_npc_badge_action(badge, _npc_interaction_action_label())
+				badge.visible = true
+	prompt_panel.visible = not prompt.text.is_empty() and not show_npc_interaction_badge
+	_sync_interaction_plaque()
+
+func _npc_interaction_action_label() -> String:
+	match active_role:
+		"Periodista": return "ENTREVISTAR"
+		"Influencer": return "ENTREGAR" if influencer_has_information else "ANIMAR"
+		"Candidato a alcalde": return "ANIMAR"
+		_: return "HABLAR"
 
 func _nearest_interaction_target(ignore_guardian8 := false) -> Dictionary:
 	var nearest: Dictionary = {}
@@ -4063,6 +5349,14 @@ func _nearest_interaction_target(ignore_guardian8 := false) -> Dictionary:
 		var guard_offset: Vector3 = player.global_position - guardian8.global_position
 		if Vector2(guard_offset.x, guard_offset.z).length() <= GUARDIAN8_REMOTE_INTERACTION_RANGE and absf(guard_offset.y) <= GUARDIAN8_REMOTE_HEIGHT_RANGE:
 			return {"kind":"guardian8", "node":guardian8}
+	if active_role == "Candidato a alcalde" and not revolutionary_rescue_completed and is_instance_valid(player):
+		if not revolutionary_rescue_has_knife and is_instance_valid(rescue_knife) and rescue_knife.visible and rescue_knife.get_parent() == self:
+			if player.global_position.distance_to(rescue_knife.global_position) <= 3.5:
+				return {"kind":"revolutionary_knife", "node":rescue_knife}
+		if is_instance_valid(tied_guard_9):
+			var rescue_offset: Vector3 = player.global_position - tied_guard_9.global_position
+			if Vector2(rescue_offset.x, rescue_offset.z).length() <= 4.5 and absf(rescue_offset.y) <= 8.0:
+				return {"kind":"revolutionary_guard", "node":tied_guard_9}
 	if fraud_letter_received and not fraud_case_resolved and _is_fraud_event_owner():
 		return _nearest_fraud_suspicion_target()
 	if active_role == "Ciudadano" and hero_is_carrying_card:
@@ -4091,11 +5385,12 @@ func _nearest_interaction_target(ignore_guardian8 := false) -> Dictionary:
 		if desk_distance < best:
 			best = desk_distance
 			nearest = {"kind":"desk"}
-	if roulette_position.x > -1000:
-		var roulette_distance := player.global_position.distance_to(roulette_position)
-		if roulette_distance < roulette_interaction_range and (nearest.is_empty() or roulette_distance < best):
-			best = roulette_distance
-			nearest = {"kind":"roulette"}
+	for wheel_info in roulette_wheels:
+		var wheel_position: Vector3 = wheel_info.get("position", Vector3(-10000, 0, 0))
+		var wheel_distance := player.global_position.distance_to(wheel_position)
+		if wheel_distance <= float(wheel_info.get("range", 4.2)) and wheel_distance < best:
+			best = wheel_distance
+			nearest = {"kind":"roulette", "roulette_id":String(wheel_info.get("id", "rotate-z2"))}
 	for i in range(npc_targets.size()):
 		var npc: Dictionary = npc_targets[i]
 		var npc_position: Vector3 = npc.position
@@ -4152,6 +5447,98 @@ func _fraud_prompt(guard_name: String) -> String:
 		return "Q  ·  Sospechar de Guardia 6  ·  fallo: −1 min"
 	return "Q  ·  Hablar con Guardia 6 y leer la carta"
 
+func _handle_revolutionary_knife_interaction() -> void:
+	if active_role != "Candidato a alcalde" or revolutionary_rescue_completed or not is_instance_valid(rescue_knife):
+		return
+	panel_uses_q = false
+	if not revolutionary_rescue_started:
+		revolutionary_knife_inspected = true
+		panel_text.text = "Oh, un cuchillo.\n\nPulsa E para cerrar."
+		return
+	if revolutionary_rescue_has_knife:
+		panel_text.text = "Ya tienes el cuchillo. Llévalo con Guardia 9 y pulsa Q para ayudarlo.\n\nPulsa E para cerrar."
+		return
+	revolutionary_rescue_has_knife = true
+	if rescue_knife.get_parent() != player:
+		rescue_knife.reparent(player, false)
+	var carried_transform := rescue_knife.transform
+	carried_transform.origin = Vector3(0.40, 0.78, -0.48)
+	rescue_knife.transform = carried_transform
+	for candidate in rescue_knife.find_children("*", "CollisionObject3D", true, false):
+		var collision_object := candidate as CollisionObject3D
+		collision_object.collision_layer = 0
+		collision_object.collision_mask = 0
+	panel_text.text = "Recogiste el cuchillo. Llévalo con Guardia 9 y pulsa Q para cortar las cuerdas.\n\nPulsa E para cerrar."
+	_update_information_hud()
+	_broadcast_coop_state()
+
+func _start_revolutionary_guard_interaction() -> void:
+	if active_role != "Candidato a alcalde" or not is_instance_valid(tied_guard_9) or revolutionary_rescue_completed:
+		return
+	if revolutionary_rescue_animation_active:
+		return
+	_play_npc_interaction_voice(tied_guard_9)
+	panel_uses_q = true
+	if revolutionary_rescue_has_knife:
+		_rescue_guardia_09()
+		return
+	if not revolutionary_rescue_started:
+		revolutionary_rescue_started = true
+		revolutionary_rescue_dialogue_stage = "guard_intro"
+		panel_text.text = "GUARDIA 09 · MENSAJERÍA\n\nTú: —¿Tú qué haces así?\n\nGuardia 9: —Por culpa mía, por hablar con una persona desconocida por mensajería, pensé que tendría una cita romántica. Pero me engañó, me secuestró y me dejó así, colgado literalmente.\n\n—Busca algo filoso con que me puedas ayudar.\n\nPulsa Q para cerrar."
+	else:
+		revolutionary_rescue_dialogue_stage = "guard_wait"
+		panel_text.text = "GUARDIA 09\n\n—Busca algo filoso con que me puedas ayudar. Cuando lo tengas, vuelve y pulsa Q.\n\nPulsa Q para cerrar."
+	panel.visible = true
+	if is_instance_valid(player):
+		player.controls_enabled = false
+	_update_information_hud()
+	_broadcast_coop_state()
+
+func _rescue_guardia_09() -> void:
+	if revolutionary_rescue_animation_active or not is_instance_valid(tied_guard_9):
+		return
+	revolutionary_rescue_animation_active = true
+	panel.visible = false
+	panel_uses_q = true
+	if is_instance_valid(player):
+		player.controls_enabled = false
+	tied_guard_9.set_process(false)
+	for candidate in tied_guard_9.find_children("*", "Node3D", true, false):
+		if String(candidate.name).to_lower().contains("sogas"):
+			(candidate as Node3D).visible = false
+	var originals: Array[Node3D] = []
+	for child in tied_guard_9.get_children():
+		if child is Node3D and String(child.name).begins_with("GuardiaOriginal"):
+			originals.append(child as Node3D)
+	var drop_to := maxf(0.25, tied_guard_9.global_position.y - 0.75)
+	var fall := create_tween().set_parallel(true)
+	fall.tween_property(tied_guard_9, "global_position:y", drop_to, 0.55).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	for original in originals:
+		fall.tween_property(original, "rotation:z", original.rotation.z + 0.45, 0.55).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	await fall.finished
+	var stand := create_tween().set_parallel(true)
+	stand.tween_property(tied_guard_9, "global_position:y", 0.06, 0.8).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	for original in originals:
+		stand.tween_property(original, "rotation:z", 0.0, 0.8).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		stand.tween_property(original, "position:y", 0.0, 0.8).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	await stand.finished
+	# El modelo deja la pose de brazos abiertos de la suspensión y queda de pie
+	# con los brazos relajados y un leve movimiento mientras se recupera.
+	tied_guard_9.set_process(true)
+	if tied_guard_9.has_method("liberar"):
+		tied_guard_9.call("liberar")
+	revolutionary_rescue_animation_active = false
+	revolutionary_rescue_completed = true
+	revolutionary_rescue_has_knife = false
+	revolutionary_rescue_dialogue_stage = "guard_thanks"
+	if is_instance_valid(rescue_knife):
+		rescue_knife.visible = false
+	panel_text.text = "GUARDIA 09 · LIBERADO\n\n—Muchísimas gracias. Estaré más pendiente la próxima vez de no escribirle a cualquiera ni chatear con desconocidos por mensajería.\n\nPulsa Q para cerrar."
+	panel.visible = true
+	_update_information_hud()
+	_broadcast_coop_state()
+
 func _is_fraud_event_owner() -> bool:
 	return fraud_owner_peer_id > 0 and fraud_owner_peer_id == multiplayer.get_unique_id()
 
@@ -4188,10 +5575,7 @@ func _handle_fraud_guard_interaction(guard_name: String) -> void:
 		else:
 			fraud_letter_received = true
 			panel_text.text = "GUARDIA 6 · CARTA RECIBIDA\n\n«Alguien me manda cartas pidiendo dinero urgente. Abrí una y quiero que me ayudes a averiguar quién las escribió.»\n\nCARTA:\n“Amigooo, necesito 30 monedas urgentesss. Envíamelas yaaa, no preguntesss y no se lo digasss a nadieee. Estoy un poquillooo confundido, pero te las devolveré prontooo.”\n\nPuedes leerla y sospechar de cualquier NPC con Q. Si acusas a la persona equivocada, perderás 1 minuto."
-			if not fraud_guard6_concern_played:
-				fraud_guard6_concern_played = true
-				var guard6 := fraud_guard_nodes.get("Guardia_06") as Node3D
-				_play_guard_concern_animation(guard6)
+			fraud_guard6_concern_played = true
 			_broadcast_coop_state()
 	panel.visible = true
 	_update_information_hud()
@@ -4227,8 +5611,14 @@ func _open_nearest_station(ignore_guardian8 := false) -> void:
 	var target := _nearest_interaction_target(ignore_guardian8)
 	if target.is_empty():
 		return
-	panel_uses_q = String(target.get("kind", "")) == "fraud_npc" or (fraud_letter_received and String(target.get("kind", "")) == "npc")
+	if String(target.get("kind", "")) == "npc":
+		_play_npc_interaction_voice(target.get("node") as Node3D)
+	elif String(target.get("kind", "")) == "fraud_npc":
+		_play_npc_interaction_voice(fraud_guard_nodes.get(String(target.get("guard_name", ""))) as Node3D)
+	panel_uses_q = String(target.get("kind", "")) in ["fraud_npc", "revolutionary_guard"] or (fraud_letter_received and String(target.get("kind", "")) == "npc")
 	match String(target.kind):
+		"revolutionary_knife":
+			_handle_revolutionary_knife_interaction()
 		"chest":
 			var index: int = target.index
 			if active_role != "Ciudadano":
@@ -4292,7 +5682,7 @@ func _open_nearest_station(ignore_guardian8 := false) -> void:
 				panel_text.text = "ESCRITORIO DE INVESTIGACIÓN\n\nEste puesto secundario es para el Mensajero. Aquí se descifra y verifica el expediente recogido del tablón."
 			_update_information_hud()
 		"roulette":
-			_use_roulette()
+			_use_roulette(String(target.get("roulette_id", "rotate-z2")))
 		"npc":
 			var npc_index: int = target.npc_index
 			var npc_node := target.node as Node3D
@@ -4312,7 +5702,8 @@ func _open_nearest_station(ignore_guardian8 := false) -> void:
 							panel_text.text = "✦   " + String(target.name).replace("_", " ") + "\n\n¡Lo animaste! Su barra volverá a llenarse y bajará en %d segundos." % int(npc_mood_duration)
 					_:
 						panel_text.text = "✦   " + String(target.name).replace("_", " ") + "\n\nEl vecino te saluda y comparte cómo van las cosas en el reino."
-				_append_npc_greeting(npc_index)
+				if active_role != "Periodista":
+					_append_npc_greeting(npc_index)
 			panel_text.text += "\n\nPulsa E para cerrar."
 			_update_information_hud()
 		"fraud_npc":
@@ -4327,12 +5718,12 @@ func _update_information_hud() -> void:
 	var fraud_status := "resuelta" if fraud_case_resolved else ("a cargo de otro jugador" if fraud_owner_peer_id > 0 and not _is_fraud_event_owner() else ("carta en mano · sospechas: %d" % fraud_wrong_suspicions if fraud_letter_received else ("habla con Guardia 7" if not fraud_guard7_spoken else "habla con Guardia 6")))
 	status += "\nESTAFA · " + fraud_status
 	if is_solo_mode:
-		status += "\nMISIÓN · %s\n%s" % [_role_display_name(active_role).to_upper(), _role_mission(active_role)]
+		status += "\nMISIONES\n%s" % _role_mission(active_role)
 	else:
 		var missions: Array[String] = []
 		for role in local_roles:
-			missions.append("%s  ·  %s" % [_role_display_name(String(role)).to_upper(), _role_mission(String(role))])
-		status += "\nMISIONES DEL EQUIPO\n" + "\n".join(PackedStringArray(missions))
+			missions.append(_role_mission(String(role)))
+		status += "\nMISIONES\n" + "\n".join(PackedStringArray(missions))
 	hud.text = status
 	_check_game_completion()
 
@@ -4469,7 +5860,11 @@ func _answer_journalist_claim(choice: int) -> void:
 	if journalist_puzzle_stage == "minigame":
 		if choice != int(claim.get("puzzle_correct", 1)):
 			_show_journalist_claim()
-			panel_text.text = "El minipuzle no quedó resuelto. Revisa las pistas e inténtalo otra vez.\n\n" + panel_text.text
+			var claim_panel_text := panel_text.text
+			var title_end := claim_panel_text.find("\n")
+			var stable_title := claim_panel_text.substr(0, title_end)
+			var claim_body := claim_panel_text.substr(title_end).strip_edges()
+			panel_text.text = "%s\n\nNo quedó resuelto. Inténtalo otra vez.\n%s" % [stable_title, claim_body]
 			return
 		journalist_puzzle_stage = "classify"
 		_show_journalist_claim()
@@ -4479,8 +5874,8 @@ func _answer_journalist_claim(choice: int) -> void:
 		var step := journalist_minigame_input.size() - 1
 		if journalist_minigame_input[step] != journalist_minigame_sequence[step]:
 			journalist_minigame_input.clear()
-			_show_journalist_claim()
-			panel_text.text = "La clave no coincide. La ruta volvió al inicio. Inténtalo otra vez.\n\n" + panel_text.text
+			var code := " · ".join(PackedStringArray(journalist_minigame_sequence.map(func(value: int) -> String: return str(value))))
+			panel_text.text = "PUZLE EN CURSO · %d / %d\n\nLa clave no coincide. La ruta volvió al inicio. Inténtalo otra vez.\n\n%s\n\nClave: %s\nEntrada: —\nContinúa con las teclas 1, 2 y 3." % [journalist_claim_index + 1, journalist_claims.size(), String(claim.get("puzzle_text", "")), code]
 			return
 		if journalist_minigame_input.size() < journalist_minigame_sequence.size():
 			_show_journalist_claim()
@@ -4617,62 +6012,238 @@ func _close_chest_visual(chest: Node3D) -> void:
 				animator.pause()
 				return
 
-func _use_roulette() -> void:
-	if roulette_used:
-		panel_text.text = "La ruleta ya se usó en esta partida. Vuelve a girarla cuando empieces una nueva.\n\nPulsa E para cerrar."
+func _roulette_role_used(wheel_id: String, role_name: String) -> bool:
+	var uses: Dictionary = roulette_role_uses.get(wheel_id, {})
+	return bool(uses.get(role_name, false))
+
+func _mark_roulette_role_used(wheel_id: String, role_name: String) -> void:
+	var uses: Dictionary = roulette_role_uses.get(wheel_id, {})
+	uses[role_name] = true
+	roulette_role_uses[wheel_id] = uses
+
+func _find_roulette_info(wheel_id: String) -> Dictionary:
+	for wheel_info in roulette_wheels:
+		if String(wheel_info.get("id", "")) == wheel_id:
+			return wheel_info
+	return {}
+
+func _use_roulette(wheel_id: String) -> void:
+	if bool(roulette_spinning_wheels.get(wheel_id, false)):
+		prompt.text = "La ruleta está girando…"
+		prompt_panel.visible = true
 		return
-	roulette_used = true
-	if is_instance_valid(roulette_node):
-		for player_node in roulette_node.find_children("*", "AnimationPlayer", true, false):
-			var animator := player_node as AnimationPlayer
-			for animation_name in animator.get_animation_list():
-				var animation_key := String(animation_name).to_lower()
-				if animation_key.contains("spin") or animation_key.contains("rotate"):
-					animator.play(String(animation_name))
-					break
-	var reward := randi_range(0, 2)
-	match reward:
+	if _roulette_role_used(wheel_id, active_role):
+		panel_text.text = "Este rol ya giró esta ruleta. Puedes probar la otra ruleta o cambiar de rol."
+		panel.visible = true
+		return
+	var outcome_index := randi_range(0, ROULETTE_OUTCOMES.size() - 1)
+	_mark_roulette_role_used(wheel_id, active_role)
+	if multiplayer.multiplayer_peer != null:
+		rpc("_receive_roulette_spin", wheel_id, active_role, outcome_index)
+	prompt.text = "La ruleta está girando…"
+	prompt_panel.visible = true
+	panel.visible = false
+	_animate_roulette_spin(wheel_id, active_role, outcome_index, true)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _receive_roulette_spin(wheel_id: String, role_name: String, outcome_index: int) -> void:
+	if _roulette_role_used(wheel_id, role_name) or bool(roulette_spinning_wheels.get(wheel_id, false)):
+		return
+	_mark_roulette_role_used(wheel_id, role_name)
+	_animate_roulette_spin(wheel_id, role_name, outcome_index, false)
+
+func _animate_roulette_spin(wheel_id: String, role_name: String, outcome_index: int, show_result: bool) -> void:
+	roulette_spinning_wheels[wheel_id] = true
+	var wheel_info := _find_roulette_info(wheel_id)
+	var spinner := wheel_info.get("node") as Node3D
+	var start_rotation := spinner.rotation if is_instance_valid(spinner) else Vector3.ZERO
+	var start_scale := spinner.scale if is_instance_valid(spinner) else Vector3.ONE
+	var final_angle := TAU * 5.0 + TAU * (float(outcome_index) + 0.5) / float(ROULETTE_OUTCOMES.size())
+	var spin_tween: Tween
+	if is_instance_valid(spinner):
+		spin_tween = create_tween()
+		spin_tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		spin_tween.tween_method(Callable(self, "_set_roulette_spin_angle").bind(spinner, start_rotation, start_scale), 0.0, final_angle, ROULETTE_SPIN_DURATION)
+	var tick_player := AudioStreamPlayer3D.new()
+	tick_player.name = "RouletteTickPlayer"
+	tick_player.stream = roulette_tick_stream
+	tick_player.volume_db = -9.0
+	tick_player.unit_size = 4.0
+	tick_player.max_distance = 26.0
+	add_child(tick_player)
+	tick_player.global_position = wheel_info.get("position", global_position)
+	_play_roulette_ticks(tick_player)
+	await get_tree().create_timer(ROULETTE_SPIN_DURATION).timeout
+	if is_instance_valid(spinner):
+		if is_instance_valid(spin_tween) and spin_tween.is_running():
+			spin_tween.kill()
+		_set_roulette_spin_angle(final_angle, spinner, start_rotation, start_scale)
+	if is_instance_valid(tick_player):
+		tick_player.queue_free()
+	roulette_spinning_wheels.erase(wheel_id)
+	var result_text := _apply_roulette_outcome(outcome_index)
+	if show_result and is_instance_valid(panel_text):
+		var result_title := "PREMIO DE LA RULETA" if outcome_index >= 0 and outcome_index < 4 else "DESVENTAJA DE LA RULETA"
+		panel_text.text = result_title + " · " + role_name.to_upper() + "\n\n" + result_text + "\n\nPulsa E para cerrar."
+		panel.visible = true
+		_update_information_hud()
+		_broadcast_coop_state()
+
+func _play_roulette_ticks(tick_player: AudioStreamPlayer3D) -> void:
+	for tick in range(ROULETTE_TICK_COUNT):
+		if not is_instance_valid(tick_player):
+			return
+		tick_player.play()
+		var progress := float(tick) / float(maxi(ROULETTE_TICK_COUNT - 1, 1))
+		var interval_scale := lerpf(0.55, 1.45, pow(progress, 1.45))
+		await get_tree().create_timer(ROULETTE_SPIN_DURATION / float(ROULETTE_TICK_COUNT) * interval_scale).timeout
+
+func _set_roulette_spin_angle(angle: float, spinner: Node3D, start_rotation: Vector3, start_scale: Vector3) -> void:
+	if not is_instance_valid(spinner):
+		return
+	spinner.transform.basis = Basis.from_euler(start_rotation) * Basis(Vector3.FORWARD, angle) * Basis.IDENTITY.scaled(start_scale)
+
+func _apply_roulette_outcome(outcome_index: int) -> String:
+	match outcome_index:
 		0:
-			npc_mood_duration = 40.0
-			for i in range(npc_targets.size()):
-				var state: Dictionary = npc_targets[i]
-				state.seconds_left = minf(float(state.seconds_left), npc_mood_duration)
-				state.mood = float(state.seconds_left) / npc_mood_duration
-				npc_targets[i] = state
-			panel_text.text = "La ruleta aceleró el desgaste del ánimo. Las barras de los guardias ahora duran 40 segundos.\n\nPulsa E para cerrar."
-		1:
-			collected_info.clear()
-			hero_is_carrying_card = false
-			pending_card_chest_index = -1
-			pending_card_clue = ""
-			card_carrier_peer_id = 0
-			_return_chest_letter_to_spawn()
-			info_delivered = false
-			_set_board_pages_placed(0)
-			for chest_info in info_chests:
-				var chest := chest_info.node as Node3D
-				_close_chest_visual(chest)
-				chest.set_meta("chest_sound_opened", false)
-			_update_information_hud()
-			_broadcast_coop_state()
-			panel_text.text = "La ruleta reinició los cofres. Tendrás que recoger las cartas y llevarlas una por una al tablón.\n\nPulsa E para cerrar."
-		2:
 			speed_boost_time = 60.0
+			_refresh_player_speed()
+		1:
+			game_time_remaining += 60.0
+			_update_timer_hud()
+		2:
+			for index in range(npc_targets.size()):
+				var state: Dictionary = npc_targets[index]
+				state.mood = 1.0
+				state.seconds_left = npc_mood_duration
+				state.recharging = false
+				state.recharge_elapsed = 0.0
+				npc_targets[index] = state
+				cheered_npcs[index] = true
+				_play_roulette_cheer(index)
+		3:
+			_roulette_grant_half_cards()
+		4:
+			game_time_remaining = maxf(0.0, game_time_remaining - 60.0)
+			_update_timer_hud()
+			if game_time_remaining <= 0.0 and not game_timer_timeout:
+				game_timer_timeout = true
+				_end_game(false)
+		5:
+			for index in range(npc_targets.size()):
+				var state: Dictionary = npc_targets[index]
+				state.mood = 0.5
+				state.seconds_left = npc_mood_duration * 0.5
+				state.recharging = false
+				state.recharge_elapsed = 0.0
+				npc_targets[index] = state
+		6:
+			slow_time = 60.0
+			_refresh_player_speed()
+		7:
+			double_jump_disabled_time = 60.0
 			if is_instance_valid(player):
-				player.set("speed", 9.0)
-			_update_information_hud()
-			_broadcast_coop_state()
-			panel_text.text = "¡Impulso de velocidad! Te moverás más rápido durante un minuto.\n\nPulsa E para cerrar."
+				player.set("max_air_jumps", 0)
+				player.set("air_jumps_left", 0)
+		8:
+			_reset_roulette_card_mission()
+	if outcome_index < 0 or outcome_index >= ROULETTE_OUTCOMES.size():
+		return "La ruleta se detuvo."
+	return ROULETTE_OUTCOMES[outcome_index]
+
+func _play_roulette_cheer(npc_index: int) -> void:
+	if npc_index < 0 or npc_index >= npc_targets.size():
+		return
+	var animator := npc_targets[npc_index].get("animator") as AnimationPlayer
+	if not is_instance_valid(animator):
+		return
+	for animation_name in animator.get_animation_list():
+		var animation_key := String(animation_name).to_lower()
+		if animation_key.contains("cheer") or animation_key.contains("happy") or animation_key.contains("wave") or animation_key.contains("dance"):
+			animator.play(String(animation_name))
+			return
+
+func _roulette_grant_half_cards() -> void:
+	var clues: Array[String] = [
+		"Alerta: un rumor sobre el centro comunitario no incluye un enlace oficial verificable.",
+		"El calendario municipal anuncia una jornada de limpieza vecinal.",
+		"Una encuesta a tres personas no representa a todo el reino.",
+		"El portal electoral confirma fecha y hora del debate municipal.",
+		"Una captura recortada no demuestra que el parque vaya a cerrar.",
+		"Revisa si la propuesta de reparación presenta responsables y presupuesto.",
+		"Compara la cifra del mensaje con el informe público original.",
+		"El mensaje sobre fondos proviene de una cuenta anónima sin pruebas.",
+		"Comprueba la fecha original de la noticia antes de compartirla.",
+		"Consulta el acta electoral para confirmar el sitio y hora de votación."
+	]
+	var cards_to_grant := maxi(0, ceili(float(REQUIRED_INFO_CHESTS) * 0.5) - collected_info.size())
+	if cards_to_grant == 0:
+		return
+	var granted := 0
+	for index in range(REQUIRED_INFO_CHESTS):
+		if collected_info.has(index):
+			continue
+		collected_info[index] = clues[index % clues.size()]
+		granted += 1
+		if index < info_chests.size():
+			var chest := info_chests[index].node as Node3D
+			if is_instance_valid(chest):
+				_stop_chest_proximity_sound(chest)
+				_open_chest_visual(chest)
+				chest.set_meta("chest_sound_opened", true)
+		if granted >= cards_to_grant:
+			break
+	answered = collected_info.size()
+	var earned_pages := 0
+	for threshold in INFORMATION_BOARD_PAGE_THRESHOLDS:
+		if answered >= threshold:
+			earned_pages += 1
+	_set_board_pages_placed(earned_pages)
+	info_delivered = earned_pages >= INFORMATION_BOARD_PAGE_THRESHOLDS.size()
+	_update_information_hud()
+	_broadcast_coop_state()
+
+func _reset_roulette_card_mission() -> void:
+	collected_info.clear()
+	answered = 0
+	hero_is_carrying_card = false
+	pending_card_chest_index = -1
+	pending_card_clue = ""
+	card_carrier_peer_id = 0
+	_return_chest_letter_to_spawn()
+	info_delivered = false
+	_set_board_pages_placed(0)
+	for chest_info in info_chests:
+		var chest := chest_info.node as Node3D
+		if not is_instance_valid(chest):
+			continue
+		_close_chest_visual(chest)
+		chest.set_meta("chest_sound_opened", false)
+	_broadcast_coop_state()
 
 func _update_speed_boost(delta: float) -> void:
-	if speed_boost_time <= 0.0:
-		return
-	var previous_seconds := ceili(speed_boost_time)
+	var previous_speed := ceili(speed_boost_time)
+	var previous_slow := ceili(slow_time)
+	var previous_double_jump_lock := ceili(double_jump_disabled_time)
 	speed_boost_time = maxf(speed_boost_time - delta, 0.0)
-	if speed_boost_time <= 0.0 and is_instance_valid(player):
-		player.set("speed", 6.0)
-	if ceili(speed_boost_time) != previous_seconds:
+	slow_time = maxf(slow_time - delta, 0.0)
+	double_jump_disabled_time = maxf(double_jump_disabled_time - delta, 0.0)
+	if double_jump_disabled_time > 0.0:
+		if is_instance_valid(player):
+			player.set("max_air_jumps", 0)
+			player.set("air_jumps_left", 0)
+	elif previous_double_jump_lock > 0 and is_instance_valid(player):
+		player.set("max_air_jumps", 1)
+		player.set("air_jumps_left", 1)
+	_refresh_player_speed()
+	if ceili(speed_boost_time) != previous_speed or ceili(slow_time) != previous_slow or ceili(double_jump_disabled_time) != previous_double_jump_lock:
 		_update_information_hud()
+
+func _refresh_player_speed() -> void:
+	if not is_instance_valid(player):
+		return
+	var current_speed := 3.0 if slow_time > 0.0 else (9.0 if speed_boost_time > 0.0 else 6.0)
+	player.set("speed", current_speed)
 
 func _answer(choice: int) -> void:
 	var q: Dictionary = questions[question_index]
@@ -4685,6 +6256,14 @@ func _answer(choice: int) -> void:
 	question_index = -1
 
 func _close_question() -> void:
+	if revolutionary_rescue_dialogue_stage in ["guard_intro", "guard_wait", "guard_thanks"]:
+		revolutionary_rescue_dialogue_stage = ""
+		panel.visible = false
+		panel_uses_q = false
+		if is_instance_valid(player) and game_running and not revolutionary_rescue_animation_active:
+			player.controls_enabled = true
+		_update_information_hud()
+		return
 	if guardian8_dialogue_pending:
 		guardian8_dialogue_pending = false
 		_begin_whale_puzzle()
@@ -4713,6 +6292,7 @@ func _local_peer_id() -> int:
 
 func _start_guardian8_interaction() -> void:
 	panel_uses_q = true
+	_play_npc_interaction_voice(guardian8)
 	if guardian8_mission_completed:
 		panel_text.text = "GUARDIA 8 · ACOMPAÑAMIENTO COMPLETADO\n\nGuardia 8 decidió quedarse con sus compañeros y pedir apoyo. Gracias por escucharlo y acompañarlo."
 		panel.visible = true
@@ -4732,34 +6312,50 @@ func _start_guardian8_interaction() -> void:
 	panel_uses_q = false
 	if is_instance_valid(player):
 		player.controls_enabled = false
-	panel_text.text = "GUARDIA 8\n\n—Esta ballena aparece en los mensajes que me llegaron. Ahora entiendo que el reto es peligroso y no quiero seguirlo.\n\n—No tienes que hacerlo. Me quedo contigo y buscamos apoyo de alguien de confianza. Podemos reconstruir juntos la imagen y dejar ese reto atrás.\n\nPulsa ESPACIO para abrir el rompecabezas."
+	panel_text.text = "GUARDIA 8\n\n—Esta ballena aparece en los mensajes que me llegaron. Ahora entiendo que el reto es peligroso y no quiero seguirlo.\n\n—No tienes que hacerlo. Me quedo contigo y buscamos apoyo de alguien de confianza. Podemos reconstruir juntos la imagen y dejar ese reto atrás."
 	panel.visible = true
 	if is_instance_valid(whale_puzzle_panel):
 		whale_puzzle_panel.visible = false
 	_update_information_hud()
 
 func _build_whale_puzzle_ui(layer: CanvasLayer) -> void:
+	whale_puzzle_dim = ColorRect.new()
+	whale_puzzle_dim.name = "Guardian8PuzzleBackdrop"
+	whale_puzzle_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	whale_puzzle_dim.color = Color(0.055, 0.075, 0.13, 0.76)
+	whale_puzzle_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	whale_puzzle_dim.visible = false
+	layer.add_child(whale_puzzle_dim)
 	whale_puzzle_panel = PanelContainer.new()
 	whale_puzzle_panel.name = "Guardian8SupportPuzzle"
 	whale_puzzle_panel.set_anchors_preset(Control.PRESET_CENTER)
-	whale_puzzle_panel.position = Vector2(-370, -310)
-	whale_puzzle_panel.custom_minimum_size = Vector2(740, 620)
+	whale_puzzle_panel.custom_minimum_size = Vector2.ZERO
 	whale_puzzle_panel.visible = false
 	whale_puzzle_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	_style_wood_panel(whale_puzzle_panel, Color("432a1d"), Vector2(740, 620))
+	_style_texture_board(whale_puzzle_panel, Rect2(18, 0, 980, 770), Vector2(1040, 780), Vector4(82, 82, 128, 108))
 	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 12)
+	content.name = "PuzzleBoardContent"
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_theme_constant_override("separation", 14)
+	var puzzle_title_plaque := PanelContainer.new()
+	puzzle_title_plaque.custom_minimum_size = Vector2(0, 54)
+	puzzle_title_plaque.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	puzzle_title_plaque.add_theme_stylebox_override("panel", _dialogue_title_style())
 	whale_puzzle_title = Label.new()
 	whale_puzzle_title.text = "GUARDIA 08 · ACOMPAÑAMIENTO"
 	whale_puzzle_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_style_cartoon_text(whale_puzzle_title, 28)
+	whale_puzzle_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	whale_puzzle_title.custom_minimum_size = Vector2(0, 42)
+	_style_cartoon_text(whale_puzzle_title, 24)
 	whale_puzzle_title.add_theme_color_override("font_color", Color("fff0bd"))
-	content.add_child(whale_puzzle_title)
+	puzzle_title_plaque.add_child(whale_puzzle_title)
+	content.add_child(puzzle_title_plaque)
 	whale_puzzle_instructions = Label.new()
 	whale_puzzle_instructions.text = "Flechas: mueve la selección · MAYÚS o BLOQ MAYÚS: gira la pieza 90° · ESPACIO: toma o coloca"
 	whale_puzzle_instructions.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	whale_puzzle_instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_style_cartoon_text(whale_puzzle_instructions, 18)
+	_style_cartoon_text(whale_puzzle_instructions, 15)
 	whale_puzzle_instructions.add_theme_color_override("font_color", Color("f8dfab"))
 	content.add_child(whale_puzzle_instructions)
 	whale_puzzle_grid = GridContainer.new()
@@ -4773,14 +6369,14 @@ func _build_whale_puzzle_ui(layer: CanvasLayer) -> void:
 	whale_puzzle_cells.clear()
 	for index in range(9):
 		var cell := Button.new()
-		cell.custom_minimum_size = Vector2(195, 137)
+		cell.custom_minimum_size = Vector2(240, 160)
 		cell.focus_mode = Control.FOCUS_NONE
 		cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		var tile_style := StyleBoxFlat.new()
 		tile_style.bg_color = Color("2b1a12")
-		tile_style.border_color = Color("e9b84d")
-		tile_style.set_border_width_all(3)
-		tile_style.set_corner_radius_all(8)
+		tile_style.border_color = Color("f2c45d")
+		tile_style.set_border_width_all(4)
+		tile_style.set_corner_radius_all(10)
 		cell.add_theme_stylebox_override("normal", tile_style)
 		cell.add_theme_stylebox_override("hover", tile_style)
 		cell.add_theme_stylebox_override("pressed", tile_style)
@@ -4794,13 +6390,39 @@ func _build_whale_puzzle_ui(layer: CanvasLayer) -> void:
 		whale_puzzle_grid.add_child(cell)
 		whale_puzzle_cells.append(cell)
 	var footer := Label.new()
-	footer.text = "Arma la imagen para acompañar a Guardia 8."
+	footer.text = "Flechas: mover · MAYÚS/BLOQ MAYÚS: girar 90° · ESPACIO: tomar o colocar"
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_style_cartoon_text(footer, 17)
+	_style_cartoon_text(footer, 13)
 	footer.add_theme_color_override("font_color", Color("f8dfab"))
 	content.add_child(footer)
 	whale_puzzle_panel.add_child(content)
 	layer.add_child(whale_puzzle_panel)
+	get_viewport().size_changed.connect(_layout_whale_puzzle_ui)
+	_layout_whale_puzzle_ui()
+
+func _layout_whale_puzzle_ui() -> void:
+	if not is_instance_valid(whale_puzzle_panel) or not is_instance_valid(whale_puzzle_grid):
+		return
+	var viewport_size := get_viewport().get_visible_rect().size
+	var board_height := minf(viewport_size.y * 0.96, 960.0)
+	var board_width := minf(minf(viewport_size.x * 0.90, 1400.0), board_height * 1.55)
+	var board_size := Vector2(minf(viewport_size.x * 0.98, board_width), minf(viewport_size.y * 0.98, board_height))
+	whale_puzzle_panel.custom_minimum_size = board_size
+	whale_puzzle_panel.size = board_size
+	whale_puzzle_panel.offset_left = -board_size.x * 0.5
+	var vertical_shift := viewport_size.y * 0.045
+	whale_puzzle_panel.offset_top = -board_size.y * 0.5 - vertical_shift
+	whale_puzzle_panel.offset_right = board_size.x * 0.5
+	whale_puzzle_panel.offset_bottom = board_size.y * 0.5 - vertical_shift
+	var cell_height := maxf(52.0, (board_size.y - 350.0) / 3.0)
+	var cell_width := cell_height * 1.5
+	var max_cell_width := (board_size.x - 164.0 - 16.0) / 3.0
+	if cell_width > max_cell_width:
+		cell_width = max_cell_width
+		cell_height = cell_width / 1.5
+	for cell in whale_puzzle_cells:
+		cell.custom_minimum_size = Vector2(cell_width, cell_height)
+	_refresh_whale_puzzle_ui()
 
 func _begin_whale_puzzle() -> void:
 	if not guardian8_dialogue_pending and not _is_guardian8_event_owner():
@@ -4830,6 +6452,7 @@ func _begin_whale_puzzle() -> void:
 		whale_puzzle_tiles[1] = first_tile
 	panel.visible = false
 	whale_puzzle_panel.visible = true
+	whale_puzzle_dim.visible = true
 	if is_instance_valid(player):
 		player.controls_enabled = false
 	_refresh_whale_puzzle_ui()
@@ -4936,6 +6559,7 @@ func _complete_guardian8_mission() -> void:
 	whale_puzzle_active = false
 	guardian8_mission_completed = true
 	whale_puzzle_panel.visible = false
+	whale_puzzle_dim.visible = false
 	if is_instance_valid(player) and game_running:
 		player.controls_enabled = true
 	if guardian8 != null and is_instance_valid(guardian8):
@@ -5036,6 +6660,49 @@ func _game_ui_atlas_region(region: Rect2) -> AtlasTexture:
 	atlas_texture.region = region
 	return atlas_texture
 
+func _style_restart_button(target: Button) -> void:
+	var plaque := StyleBoxTexture.new()
+	plaque.texture = RESTART_BUTTON_MEDALLION
+	plaque.content_margin_left = 0
+	plaque.content_margin_right = 0
+	plaque.content_margin_top = 0
+	plaque.content_margin_bottom = 0
+	var hover := plaque.duplicate() as StyleBoxTexture
+	hover.modulate_color = Color(1.12, 1.08, 0.92, 1.0)
+	var pressed := plaque.duplicate() as StyleBoxTexture
+	pressed.modulate_color = Color(0.84, 0.72, 0.54, 1.0)
+	pressed.content_margin_top = 14
+	pressed.content_margin_bottom = 10
+	target.add_theme_stylebox_override("normal", plaque)
+	target.add_theme_stylebox_override("hover", hover)
+	target.add_theme_stylebox_override("pressed", pressed)
+	target.add_theme_stylebox_override("focus", hover)
+	target.add_theme_color_override("font_color", Color("fff0bd"))
+	target.add_theme_color_override("font_hover_color", Color("fff9dd"))
+	target.add_theme_color_override("font_pressed_color", Color("ffe39a"))
+	target.add_theme_color_override("font_focus_color", Color("fff9dd"))
+	target.add_theme_constant_override("outline_size", 2)
+	target.add_theme_color_override("font_outline_color", Color("563016"))
+
+func _animate_restart_button(hovered: bool) -> void:
+	if not is_instance_valid(restart_button):
+		return
+	if is_instance_valid(restart_button_tween) and restart_button_tween.is_running():
+		restart_button_tween.kill()
+	restart_button_tween = create_tween()
+	restart_button_tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	restart_button_tween.tween_property(restart_button, "scale", Vector2(1.035, 1.035) if hovered else Vector2.ONE, 0.14)
+
+func _press_restart_button(is_pressed: bool) -> void:
+	if not is_instance_valid(restart_button):
+		return
+	if is_instance_valid(restart_button_tween) and restart_button_tween.is_running():
+		restart_button_tween.kill()
+	restart_button_tween = create_tween()
+	restart_button_tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	var destination := Vector2(0.98, 0.98) if is_pressed else (Vector2(1.035, 1.035) if restart_button.get_global_rect().has_point(get_viewport().get_mouse_position()) else Vector2.ONE)
+	restart_button_tween.tween_property(restart_button, "scale", destination, 0.08)
+
 func _style_atlas_panel(target: PanelContainer, minimum_size: Vector2 = Vector2.ZERO) -> void:
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0, 0, 0, 0)
@@ -5077,6 +6744,208 @@ func _style_wood_panel(target: PanelContainer, background: Color = Color("432a1d
 	target.add_theme_stylebox_override("panel", style)
 	if minimum_size != Vector2.ZERO:
 		target.custom_minimum_size = minimum_size
+
+func _style_texture_board(target: PanelContainer, region: Rect2, minimum_size: Vector2, content_margins: Vector4) -> void:
+	var board_atlas := AtlasTexture.new()
+	board_atlas.atlas = DIALOGUE_BOARDS_ATLAS
+	board_atlas.region = region
+	board_atlas.filter_clip = true
+	var board_style := StyleBoxTexture.new()
+	board_style.texture = board_atlas
+	board_style.content_margin_left = content_margins.x
+	board_style.content_margin_right = content_margins.y
+	board_style.content_margin_top = content_margins.z
+	board_style.content_margin_bottom = content_margins.w
+	target.add_theme_stylebox_override("panel", board_style)
+	target.custom_minimum_size = minimum_size
+
+func _dialogue_title_style() -> StyleBoxFlat:
+	var title_style := StyleBoxFlat.new()
+	title_style.bg_color = Color("58341e")
+	title_style.border_color = Color("f4c35b")
+	title_style.set_border_width_all(3)
+	title_style.set_corner_radius_all(18)
+	title_style.shadow_color = Color(0.16, 0.075, 0.02, 0.68)
+	title_style.shadow_size = 6
+	title_style.shadow_offset = Vector2(0, 3)
+	title_style.content_margin_left = 16
+	title_style.content_margin_right = 16
+	title_style.content_margin_top = 4
+	title_style.content_margin_bottom = 4
+	return title_style
+
+func _dialogue_keycap_style() -> StyleBoxFlat:
+	var keycap_style := StyleBoxFlat.new()
+	keycap_style.bg_color = Color("f0d49b")
+	keycap_style.border_color = Color("9c5c22")
+	keycap_style.set_border_width_all(3)
+	keycap_style.set_corner_radius_all(10)
+	keycap_style.shadow_color = Color(0.12, 0.055, 0.025, 0.72)
+	keycap_style.shadow_size = 4
+	keycap_style.shadow_offset = Vector2(0, 2)
+	return keycap_style
+
+func _sync_interaction_plaque() -> void:
+	if not is_instance_valid(prompt) or not is_instance_valid(prompt_keycap_label) or not is_instance_valid(prompt_action_label):
+		return
+	var current_text := prompt.text.strip_edges()
+	var separator_index := current_text.find("·")
+	var key_name := current_text.substr(0, separator_index).strip_edges() if separator_index > 0 else ""
+	var has_action_key := key_name in ["E", "Q", "ESPACIO"]
+	var keycap_panel := prompt_keycap_label.get_parent() as PanelContainer
+	prompt_keycap_label.visible = has_action_key
+	if has_action_key:
+		prompt_keycap_label.text = key_name
+		var is_space_key := key_name == "ESPACIO"
+		if is_instance_valid(keycap_panel):
+			keycap_panel.visible = true
+			keycap_panel.custom_minimum_size = Vector2(112, 56) if is_space_key else Vector2(62, 56)
+		prompt_keycap_label.custom_minimum_size = Vector2(104, 48) if is_space_key else Vector2(52, 48)
+		prompt_keycap_label.add_theme_font_size_override("font_size", 14 if is_space_key else 22)
+		var action_text := current_text.substr(separator_index + 1).strip_edges()
+		prompt_action_label.text = "CERRAR" if action_text.to_lower() == "cerrar" else action_text
+		prompt_action_label.add_theme_font_size_override("font_size", 17 if action_text.length() > 22 else 19)
+	else:
+		if is_instance_valid(keycap_panel):
+			keycap_panel.visible = false
+		prompt_action_label.text = current_text
+
+func _sync_dialogue_board_text() -> void:
+	if not is_instance_valid(panel_text) or not is_instance_valid(dialogue_title_label) or not is_instance_valid(dialogue_body_label):
+		return
+	if dialogue_source_cache == panel_text.text:
+		return
+	dialogue_source_cache = panel_text.text
+	var lines := dialogue_source_cache.split("\n")
+	var title_index := -1
+	for index in range(lines.size()):
+		if not String(lines[index]).strip_edges().is_empty():
+			title_index = index
+			break
+	if title_index < 0:
+		dialogue_title_label.text = "MENSAJE DEL REINO"
+		dialogue_body_label.text = ""
+		return
+	var title := String(lines[title_index]).strip_edges()
+	var handoff_notice := title.begins_with("El Héroe entrega aquí las cartas")
+	var knife_notice := title.begins_with("Oh, un cuchillo") or title.begins_with("Ya tienes el cuchillo") or title.begins_with("Recogiste el cuchillo")
+	var displayed_title := title
+	if handoff_notice:
+		displayed_title = "TABLÓN DE INFORMACIÓN"
+	elif title.begins_with("Oh, un cuchillo"):
+		displayed_title = "HALLAZGO · CUCHILLO"
+	elif title.begins_with("Ya tienes el cuchillo") or title.begins_with("Recogiste el cuchillo"):
+		displayed_title = "CUCHILLO RECOGIDO"
+	elif title.begins_with("GUARDIA 09 · LIBERADO"):
+		displayed_title = "RESCATE COMPLETADO"
+	dialogue_title_label.text = "◆   %s   ◆" % displayed_title
+	var body_lines: Array[String] = []
+	if handoff_notice:
+		body_lines.append(title)
+	if knife_notice:
+		body_lines.append(title)
+	var compact_research_puzzle := (title.begins_with("ESCANEO DE DATOS") and dialogue_source_cache.contains("PUZLE DE TRES EN RAYA")) or title.begins_with("PUZLE EN CURSO")
+	for index in range(title_index + 1, lines.size()):
+		var body_line := String(lines[index])
+		var normalized_line := body_line.strip_edges().to_lower()
+		if normalized_line.begins_with("pulsa e para cerrar") or normalized_line.begins_with("pulsa q para cerrar") or normalized_line.begins_with("pulsa espacio para abrir el rompecabezas"):
+			continue
+		if compact_research_puzzle and body_line.strip_edges().is_empty():
+			continue
+		body_lines.append(body_line)
+	dialogue_body_label.text = "\n".join(body_lines).strip_edges()
+	_layout_dialogue_board()
+
+func _layout_dialogue_board() -> void:
+	if not is_instance_valid(panel) or not is_instance_valid(prompt_panel) or not is_instance_valid(dialogue_title_plaque):
+		return
+	var viewport_size := get_viewport().get_visible_rect().size
+	var knife_notice := is_instance_valid(panel_text) and (panel_text.text.begins_with("Oh, un cuchillo") or panel_text.text.begins_with("Ya tienes el cuchillo") or panel_text.text.begins_with("Recogiste el cuchillo"))
+	var rescue_notice := is_instance_valid(panel_text) and panel_text.text.begins_with("GUARDIA 09 · LIBERADO")
+	var centered_knife_panel := knife_notice or rescue_notice
+	var dialogue_body_font := int(round(clampf(viewport_size.y * 0.028, 16.0, 21.0)))
+	var is_research_puzzle := is_instance_valid(panel_text) and panel_text.text.begins_with("ESCANEO DE DATOS") and panel_text.text.contains("PUZLE DE TRES EN RAYA")
+	if is_research_puzzle:
+		dialogue_body_font = int(round(clampf(viewport_size.y * 0.020, 14.0, 16.0)))
+	elif is_instance_valid(panel_text) and (panel_text.text.begins_with("PUZLE EN CURSO") or panel_text.text.begins_with("El Héroe entrega aquí las cartas")):
+		dialogue_body_font = int(round(clampf(viewport_size.y * 0.022, 15.0, 18.0)))
+	if knife_notice:
+		dialogue_body_font = int(round(clampf(viewport_size.y * 0.024, 15.0, 18.0)))
+	dialogue_body_label.add_theme_font_size_override("font_size", dialogue_body_font)
+	var dialogue_title_font := int(round(clampf(viewport_size.y * 0.026, 16.0, 20.0)))
+	if dialogue_title_label.text.length() > 28:
+		dialogue_title_font = int(round(dialogue_title_font * 0.82))
+	if dialogue_title_label.text.length() > 38:
+		dialogue_title_font = int(round(dialogue_title_font * 0.78))
+	dialogue_title_label.add_theme_font_size_override("font_size", dialogue_title_font)
+	# Standard conversations sit beside the NPC, leaving the mission HUD visible.
+	# Only the whale puzzle uses the larger centered layout.
+	var board_size := Vector2(minf(viewport_size.x * 0.52, 720.0), minf(viewport_size.y * 0.64, 620.0))
+	board_size.x = maxf(440.0, board_size.x)
+	board_size.y = maxf(360.0, board_size.y)
+	if centered_knife_panel:
+		board_size = Vector2(minf(viewport_size.x * 0.62, 760.0), minf(viewport_size.y * 0.50, 390.0))
+		board_size.x = maxf(420.0, board_size.x)
+		board_size.y = maxf(300.0, board_size.y)
+	panel.custom_minimum_size = board_size
+	panel.size = board_size
+	if centered_knife_panel:
+		panel.set_anchors_preset(Control.PRESET_CENTER)
+		panel.offset_left = -board_size.x * 0.5
+		panel.offset_top = -board_size.y * 0.5
+		panel.offset_right = board_size.x * 0.5
+		panel.offset_bottom = board_size.y * 0.5
+	else:
+		panel.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+		var right_margin := viewport_size.x * 0.04
+		var vertical_shift := viewport_size.y * 0.11
+		panel.offset_left = -board_size.x - right_margin
+		panel.offset_top = -board_size.y * 0.5 - vertical_shift
+		panel.offset_right = -right_margin
+		panel.offset_bottom = board_size.y * 0.5 - vertical_shift
+	var board_style := StyleBoxTexture.new()
+	var board_atlas := AtlasTexture.new()
+	board_atlas.atlas = DIALOGUE_BOARDS_ATLAS
+	board_atlas.region = Rect2(18, 0, 980, 770)
+	board_atlas.filter_clip = true
+	board_style.texture = board_atlas
+	board_style.content_margin_left = board_size.x * 0.14
+	board_style.content_margin_right = board_size.x * 0.14
+	board_style.content_margin_top = board_size.y * 0.17
+	board_style.content_margin_bottom = board_size.y * 0.09
+	panel.add_theme_stylebox_override("panel", board_style)
+	var title_width := board_size.x * (0.78 if centered_knife_panel else 0.80)
+	var title_holder_size := Vector2(title_width, 52.0 + board_size.y * 0.05)
+	dialogue_title_holder.custom_minimum_size = title_holder_size
+	dialogue_title_holder.size = title_holder_size
+	dialogue_title_plaque.custom_minimum_size = Vector2(title_width, 52.0)
+	dialogue_title_plaque.size = dialogue_title_plaque.custom_minimum_size
+	dialogue_title_plaque.position = Vector2(0, board_size.y * (0.025 if centered_knife_panel else 0.04))
+	var plaque_width := minf(viewport_size.x * 0.43, 600.0)
+	var plaque_height := clampf(viewport_size.y * 0.24, 144.0, 178.0)
+	prompt_panel.custom_minimum_size = Vector2(plaque_width, plaque_height)
+	prompt_panel.size = Vector2(plaque_width, plaque_height)
+	var action_center_offset := 0.0
+	prompt_panel.offset_left = action_center_offset - plaque_width * 0.5
+	var bottom_margin := maxf(12.0, viewport_size.y * 0.02)
+	prompt_panel.offset_top = -plaque_height - bottom_margin
+	prompt_panel.offset_right = action_center_offset + plaque_width * 0.5
+	prompt_panel.offset_bottom = -bottom_margin
+	prompt.custom_minimum_size = Vector2.ZERO
+	var action_margin_x := plaque_width * 0.075
+	var action_margin_top := plaque_height * 0.10
+	var action_margin_bottom := plaque_height * 0.02
+	var action_style := StyleBoxTexture.new()
+	var action_atlas := AtlasTexture.new()
+	action_atlas.atlas = DIALOGUE_BOARDS_ATLAS
+	action_atlas.region = Rect2(985, 230, 1015, 280)
+	action_atlas.filter_clip = true
+	action_style.texture = action_atlas
+	action_style.content_margin_left = action_margin_x
+	action_style.content_margin_right = action_margin_x
+	action_style.content_margin_top = action_margin_top
+	action_style.content_margin_bottom = action_margin_bottom
+	prompt_panel.add_theme_stylebox_override("panel", action_style)
 
 func _style_wood_button(target: Button) -> void:
 	var normal := StyleBoxFlat.new()

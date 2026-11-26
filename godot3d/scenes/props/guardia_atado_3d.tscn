@@ -1,0 +1,13 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/kenney/characters/Models/GLB format/character-knight.glb" id="1_knight"]
+[ext_resource type="PackedScene" path="res://scenes/props/sogas_guardia_3d.tscn" id="2_ropes"]
+[ext_resource type="Script" path="res://scripts/guardia_atado_animacion.gd" id="3_arm_animation"]
+
+[node name="GuardiaAtado" type="Node3D"]
+script = ExtResource("3_arm_animation")
+
+[node name="GuardiaOriginal" parent="." instance=ExtResource("1_knight")]
+transform = Transform3D(-1.55, 0, 0, 0, -1.55, 0, 0, 0, 1.55, 0, 1.31, 0)
+
+[node name="SogasAjustadas" parent="GuardiaOriginal" instance=ExtResource("2_ropes")]

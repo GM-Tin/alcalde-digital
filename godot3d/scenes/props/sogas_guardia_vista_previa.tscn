@@ -1,0 +1,50 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/kenney/characters/Models/GLB format/character-knight.glb" id="1_knight"]
+[ext_resource type="PackedScene" path="res://scenes/props/sogas_guardia_3d.tscn" id="2_ropes"]
+[ext_resource type="Script" path="res://scripts/sogas_guardia_preview.gd" id="3_preview"]
+
+[sub_resource type="Environment" id="Environment_preview"]
+background_mode = 1
+background_color = Color(0.29, 0.34, 0.43, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.82, 0.86, 1, 1)
+ambient_light_energy = 0.8
+
+[sub_resource type="PlaneMesh" id="Plane_preview"]
+size = Vector2(5, 5)
+
+[sub_resource type="StandardMaterial3D" id="FloorMaterial_preview"]
+albedo_color = Color(0.17, 0.2, 0.25, 1)
+roughness = 0.92
+
+[node name="SogasGuardiaPreview" type="Node3D"]
+script = ExtResource("3_preview")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_preview")
+
+[node name="KeyLight" type="DirectionalLight3D" parent="."]
+rotation = Vector3(-0.83, -0.61, 0)
+light_energy = 1.35
+shadow_enabled = true
+
+[node name="FillLight" type="DirectionalLight3D" parent="."]
+rotation = Vector3(-0.45, 2.45, 0)
+light_color = Color(0.56, 0.7, 1, 1)
+light_energy = 0.55
+
+[node name="Floor" type="MeshInstance3D" parent="."]
+position = Vector3(0, -0.02, 0)
+mesh = SubResource("Plane_preview")
+material_override = SubResource("FloorMaterial_preview")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+position = Vector3(1.55, 1.05, 2.25)
+current = true
+fov = 38.0
+
+[node name="GuardiaOriginal" parent="." instance=ExtResource("1_knight")]
+transform = Transform3D(-1.55, 0, 0, 0, -1.55, 0, 0, 0, 1.55, 0, 1.31, 0)
+
+[node name="SogasAjustadas" parent="GuardiaOriginal" instance=ExtResource("2_ropes")]
